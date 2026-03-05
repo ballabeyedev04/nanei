@@ -36,7 +36,7 @@ exports.envoieColisController = async (req, res) => {
 
 // Nouveau contrôleur : recherche de client
 exports.rechercherClientController = async (req, res) => {
-  const searchTerm = req.query.q; // ex: /api/client/rechercher?q=jean
+  const searchTerm = req.query.q; 
 
   try {
     const result = await EnvoieColisService.rechercherClient(searchTerm);
@@ -55,6 +55,49 @@ exports.rechercherClientController = async (req, res) => {
     console.error('Erreur recherche client :', err);
     return res.status(500).json({
       message: 'Erreur serveur lors de la recherche du client',
+      erreur: err.message
+    });
+  }
+};
+
+// 🔹 Récupérer les colis envoyés par l'utilisateur connecté
+exports.getColisEnvoyesController = async (req, res) => {
+  try {
+    // req.user est rempli par ton middleware d'auth avec le token décodé
+    const utilisateurId = req.user.id;
+
+    const result = await EnvoieColisService.getColisEnvoyes(utilisateurId);
+
+    if (!result.success) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    return res.status(200).json({ data: result.data });
+  } catch (err) {
+    console.error('Erreur récupération colis envoyés :', err);
+    return res.status(500).json({
+      message: 'Erreur serveur lors de la récupération des colis envoyés',
+      erreur: err.message
+    });
+  }
+};
+
+// 🔹 Récupérer les colis reçus par l'utilisateur connecté
+exports.getColisRecusController = async (req, res) => {
+  try {
+    const utilisateurId = req.user.id;
+
+    const result = await EnvoieColisService.getColisRecus(utilisateurId);
+
+    if (!result.success) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    return res.status(200).json({ data: result.data });
+  } catch (err) {
+    console.error('Erreur récupération colis reçus :', err);
+    return res.status(500).json({
+      message: 'Erreur serveur lors de la récupération des colis reçus',
       erreur: err.message
     });
   }

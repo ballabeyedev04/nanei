@@ -111,6 +111,62 @@ class EnvoieColisService {
       };
     }
   }
+
+  // 🔹 Récupérer les colis envoyés par un utilisateur
+  static async getColisEnvoyes(utilisateurId) {
+    try {
+      const colisEnvoyes = await Colis.findAll({
+        where: { expediteurId: utilisateurId },
+        include: [
+          {
+            model: Utilisateur,
+            as: 'recepteur',
+            attributes: ['id', 'nom', 'prenom', 'email']
+          },
+        ],
+        order: [['created_at', 'DESC']]
+      });
+
+      return {
+        success: true,
+        data: colisEnvoyes
+      };
+    } catch (error) {
+      console.error('❌ Erreur getColisEnvoyes:', error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+  // 🔹 Récupérer les colis reçus par un utilisateur
+  static async getColisRecus(utilisateurId) {
+    try {
+      const colisRecus = await Colis.findAll({
+        where: { recepteurId: utilisateurId },
+        include: [
+          {
+            model: Utilisateur,
+            as: 'expediteur',
+            attributes: ['id', 'nom', 'prenom', 'email']
+          },
+        ],
+        order: [['created_at', 'DESC']]
+      });
+
+      return {
+        success: true,
+        data: colisRecus
+      };
+    } catch (error) {
+      console.error('❌ Erreur getColisRecus:', error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
 }
 
 module.exports = EnvoieColisService;
