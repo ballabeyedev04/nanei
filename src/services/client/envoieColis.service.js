@@ -75,6 +75,42 @@ class EnvoieColisService {
       };
     }
   }
+
+  // 🔹 Rechercher un client par nom, prénom ou email
+  static async rechercherClient(searchTerm) {
+    try {
+      // Si la recherche est vide, on peut retourner une liste vide
+      if (!searchTerm || searchTerm.trim() === '') {
+        return {
+          success: true,
+          data: []
+        };
+      }
+
+      const clients = await Utilisateur.findAll({
+        where: {
+          [Op.or]: [
+            { nom: { [Op.like]: `%${searchTerm}%` } },
+            { prenom: { [Op.like]: `%${searchTerm}%` } },
+            { email: { [Op.like]: `%${searchTerm}%` } }
+          ]
+        },
+        attributes: ['id', 'nom', 'prenom', 'email'], // on limite aux champs utiles
+        limit: 20 // limite raisonnable
+      });
+
+      return {
+        success: true,
+        data: clients
+      };
+    } catch (error) {
+      console.error('❌ Erreur recherche client:', error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
 }
 
 module.exports = EnvoieColisService;
