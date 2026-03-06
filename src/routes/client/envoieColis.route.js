@@ -15,4 +15,9 @@ router.get('/colis-envoyes', authMiddleware, envoieColisController.getColisEnvoy
 // 🔹 Récupérer tous les colis reçus par l'utilisateur
 router.get('/colis-recus', authMiddleware, envoieColisController.getColisRecusController);
 
+router.get(
+  '/client/statistiques-colis',
+  authMiddleware,
+  envoieColisController.statistiquesColis
+);
 module.exports = router;

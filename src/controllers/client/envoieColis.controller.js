@@ -102,3 +102,15 @@ exports.getColisRecusController = async (req, res) => {
     });
   }
 };
+
+exports.statistiquesColis= async (req, res) => {
+  const utilisateurId = req.user.id;
+
+  const result = await EnvoieColisService.getStatistiquesColis(utilisateurId);
+
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+
+  return res.json(result);
+}

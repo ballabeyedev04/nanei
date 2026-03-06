@@ -167,6 +167,38 @@ class EnvoieColisService {
       };
     }
   }
+
+  // 🔹 Statistiques colis utilisateur
+  static async getStatistiquesColis(utilisateurId) {
+    try {
+
+      const colisEnvoyes = await Colis.count({
+        where: { expediteurId: utilisateurId }
+      });
+
+      const colisRecus = await Colis.count({
+        where: { recepteurId: utilisateurId }
+      });
+
+      return {
+        success: true,
+        data: {
+          colisEnvoyes,
+          colisRecus,
+          total: colisEnvoyes + colisRecus
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ Erreur getStatistiquesColis:', error);
+
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
 }
 
 module.exports = EnvoieColisService;
