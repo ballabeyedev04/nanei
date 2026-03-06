@@ -16,7 +16,7 @@ router.get('/colis-envoyes', authMiddleware, envoieColisController.getColisEnvoy
 router.get('/colis-recus', authMiddleware, envoieColisController.getColisRecusController);
 
 router.get(
-  '/client/statistiques-colis',
+  '/statistiques-colis',
   authMiddleware,
   envoieColisController.statistiquesColis
 );
