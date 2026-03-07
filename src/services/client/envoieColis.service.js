@@ -136,6 +136,11 @@ static async genererReferenceColis() {
             as: 'recepteur',
             attributes: ['id', 'nom', 'prenom', 'email']
           },
+          {
+            model: Utilisateur,
+            as: 'expediteur',
+            attributes: ['id', 'nom', 'prenom', 'email']
+          },
         ],
         order: [['created_at', 'DESC']]
       });
@@ -162,6 +167,11 @@ static async genererReferenceColis() {
           {
             model: Utilisateur,
             as: 'expediteur',
+            attributes: ['id', 'nom', 'prenom', 'email']
+          },
+          {
+            model: Utilisateur,
+            as: 'recepteur',
             attributes: ['id', 'nom', 'prenom', 'email']
           },
         ],
