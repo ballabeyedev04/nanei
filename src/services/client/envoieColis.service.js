@@ -212,21 +212,21 @@ static async genererReferenceColis() {
     }
   }
 
-  // 🔹 Récupérer les notifications reçus par un utilisateur
+  // 🔹 Récupérer les notifications reçues par un utilisateur
   static async getNotifications(utilisateurId) {
     try {
       const notificationsRecus = await Notifications.findAll({
         where: { recepteurId: utilisateurId },
-         include: [
+        include: [
           {
             model: Colis,
             as: 'colis',
-            attributes: ['id', 'reference', 'type_colis']
+            attributes: ['id', 'reference', 'type_colis', 'description', 'statut', 'created_at']
           },
           {
             model: Utilisateur,
             as: 'expediteur',
-            attributes: ['id', 'nom', 'prenom']
+            attributes: ['id', 'nom', 'prenom', 'email']
           }
         ],
         order: [['created_at', 'DESC']],
@@ -235,10 +235,10 @@ static async genererReferenceColis() {
 
       return {
         success: true,
-        data: colisRecus
+        data: notificationsRecus
       };
     } catch (error) {
-      console.error('❌ Erreur getColisRecus:', error);
+      console.error('❌ Erreur getNotifications:', error);
       return {
         success: false,
         message: error.message
