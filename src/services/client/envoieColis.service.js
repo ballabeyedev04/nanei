@@ -1,8 +1,7 @@
-const { Colis, Utilisateur } = require('../../models');
+const { Colis, Utilisateur, Notifications} = require('../../models');
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
-const Notifications = require('../models/Notifications');
 
 class EnvoieColisService {
 
@@ -206,6 +205,64 @@ static async genererReferenceColis() {
     } catch (error) {
       console.error('❌ Erreur getStatistiquesColis:', error);
 
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+  // 🔹 Récupérer les notifications reçus par un utilisateur
+  static async getNotifications(utilisateurId) {
+    try {
+      const notificationsRecus = await Notifications.findAll({
+        where: { recepteurId: utilisateurId },
+         include: [
+          {
+            model: Colis,
+            as: 'colis',
+            attributes: ['id', 'reference', 'type_colis', 'description', 'statut', 'created_at']
+          },
+          {
+            model: Utilisateur,
+            as: 'expediteur',
+            attributes: ['id', 'nom', 'prenom', 'email']
+          }
+        ],
+        order: [['created_at', 'DESC']],
+        limit: 50
+      });
+
+      return {
+        success: true,
+        data: colisRecus
+      };
+    } catch (error) {
+      console.error('❌ Erreur getColisRecus:', error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+   static async marquerNotificationCommeLue(notificationId) {
+    try {
+      const notif = await Notifications.findByPk(notificationId);
+      if (!notif) {
+        throw new Error('Notification introuvable');
+      }
+
+      notif.statut = 'lu';
+      await notif.save();
+
+      return {
+        success: true,
+        data: notif
+      };
+
+    } catch (error) {
+      console.error('❌ Erreur marquerNotificationCommeLue:', error);
       return {
         success: false,
         message: error.message

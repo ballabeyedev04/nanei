@@ -116,3 +116,45 @@ exports.statistiquesColis= async (req, res) => {
 
   return res.json(result);
 }
+
+// 🔹 Récupérer les notifications reçues par l'utilisateur connecté
+exports.getNotificationsController = async (req, res) => {
+  try {
+    const utilisateurId = req.user.id;
+
+    const result = await EnvoieColisService.getNotifications(utilisateurId);
+
+    if (!result.success) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    return res.status(200).json({ data: result.data });
+  } catch (err) {
+    console.error('Erreur récupération notifications :', err);
+    return res.status(500).json({
+      message: 'Erreur serveur lors de la récupération des notifications',
+      erreur: err.message
+    });
+  }
+};
+
+// 🔹 Marquer une notification comme lue
+exports.marquerNotificationCommeLueController = async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+
+    const result = await EnvoieColisService.marquerNotificationCommeLue(notificationId);
+
+    if (!result.success) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    return res.status(200).json({ message: 'Notification marquée comme lue', data: result.data });
+  } catch (err) {
+    console.error('Erreur marquer notification comme lue :', err);
+    return res.status(500).json({
+      message: 'Erreur serveur lors de la mise à jour de la notification',
+      erreur: err.message
+    });
+  }
+};

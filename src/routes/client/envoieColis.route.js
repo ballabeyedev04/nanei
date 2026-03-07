@@ -20,4 +20,9 @@ router.get(
   authMiddleware,
   envoieColisController.statistiquesColis
 );
+
+router.get('/mes-notifications', authMiddleware, envoieColisController.getNotificationsController);
+
+router.patch('/lire-notifications/:notificationId', authMiddleware, envoieColisController.marquerNotificationCommeLueController);
+
 module.exports = router;
