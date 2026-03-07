@@ -1,17 +1,11 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/db');
 
-const Colis = sequelize.define('Colis', {
+const Notifications = sequelize.define('Notifications', {
   id: {
     type: DataTypes.UUID,
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
-  },
-
-  reference: {
-    type: DataTypes.STRING,
-    unique: true,
-    allowNull: false
   },
 
   expediteurId: {
@@ -32,42 +26,28 @@ const Colis = sequelize.define('Colis', {
     }
   },
 
-  poids: {
-    type: DataTypes.FLOAT,
+  colisId: {
+    type: DataTypes.UUID,
     allowNull: false,
-  },
-
-  prix: {
-    type: DataTypes.FLOAT,
-    allowNull: false,
-  },
-  destination: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  description: {
-    type: DataTypes.TEXT,
-    allowNull: true
-  },
-  type_colis: {
-    type: DataTypes.STRING,
-    allowNull: false
+    references: {
+      model: 'colis',
+      key: 'id'
+    }
   },
 
   statut: {
     type: DataTypes.ENUM(
-      'en_attente',
-      'recupere',
-      'livre'
+        'lu',
+        'non_lu'
     ),
-    defaultValue: 'en_attente'
-  }
+    defaultValue: 'non_lu'
+    }
 
 }, {
-  tableName: 'colis',
+  tableName: 'notifications',
   timestamps: true,
   paranoid: true,
   underscored: true
 });
 
-module.exports = Colis;
+module.exports = Notifications;

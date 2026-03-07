@@ -4,6 +4,9 @@ const app = require('./app');
 
 // Modèles
 const User = require('./models/utilisateur.model');
+const Colis = require('./models/colis.model');
+const Notification = require('./models/notification.model');
+
 
 (async () => {
   try {

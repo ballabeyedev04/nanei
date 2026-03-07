@@ -1,30 +1,34 @@
 const { Colis, Utilisateur } = require('../../models');
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
+const crypto = require('crypto');
+const Notifications = require('../models/Notifications');
 
 class EnvoieColisService {
 
   // 🔹 Générer référence
-  static async genererReferenceColis() {
+static async genererReferenceColis() {
+
+  let reference;
+  let existe = true;
+
+  while (existe) {
+
     const annee = new Date().getFullYear();
+    const random = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const time = Date.now().toString().slice(-4);
 
-    const dernierColis = await Colis.findOne({
-      where: {
-        reference: { [Op.like]: `COL-${annee}-%` }
-      },
-      order: [['created_at', 'DESC']],
-      attributes: ['reference']
-    });
+    reference = `COL-${annee}-${random}-${time}`;
 
-    let compteur = 1;
+    const colis = await Colis.findOne({ where: { reference } });
 
-    if (dernierColis?.reference) {
-      const parts = dernierColis.reference.split('-');
-      compteur = parseInt(parts[2]) + 1;
+    if (!colis) {
+      existe = false;
     }
-
-    return `COL-${annee}-${String(compteur).padStart(4, '0')}`;
   }
+
+  return reference;
+}
 
   // 🔹 Créer colis
   static async envoieColis({
@@ -32,7 +36,9 @@ class EnvoieColisService {
     poids,
     prix,
     utilisateurConnecte,
-    destination
+    destination,
+    description,
+    type_colis
   }) {
 
     const transaction = await sequelize.transaction();
@@ -54,7 +60,15 @@ class EnvoieColisService {
         expediteurId: utilisateurConnecte.id,
         poids,
         prix,
-        destination
+        destination,
+        description: description || null,
+        type_colis
+      }, { transaction });
+
+      await Notifications.create({
+        expediteurId: utilisateurConnecte.id,
+        recepteurId: recepteurId,
+        colisId: colis.id
       }, { transaction });
 
       await transaction.commit();

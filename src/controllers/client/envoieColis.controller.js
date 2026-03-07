@@ -2,7 +2,7 @@ const EnvoieColisService = require('../../services/client/envoieColis.service');
 
 // Contrôleur existant (envoi de colis)
 exports.envoieColisController = async (req, res) => {
-  const { recepteurId, poids, prix, destination } = req.body;
+  const { recepteurId, poids, prix, destination, description, type_colis } = req.body;
   const utilisateurConnecte = req.user;
 
   try {
@@ -11,7 +11,9 @@ exports.envoieColisController = async (req, res) => {
       poids,
       prix,
       utilisateurConnecte,
-      destination
+      destination,
+      description,
+      type_colis
     });
 
     if (!result.success) {
