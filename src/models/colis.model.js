@@ -51,7 +51,7 @@ const Colis = sequelize.define('Colis', {
   },
   type_colis: {
     type: DataTypes.STRING,
-    allowNull: false
+    allowNull: true
   },
 
   statut: {
