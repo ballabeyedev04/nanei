@@ -221,12 +221,12 @@ static async genererReferenceColis() {
           {
             model: Colis,
             as: 'colis',
-            attributes: ['id', 'reference', 'type_colis', 'description', 'statut', 'created_at']
+            attributes: ['id', 'reference', 'type_colis']
           },
           {
             model: Utilisateur,
             as: 'expediteur',
-            attributes: ['id', 'nom', 'prenom', 'email']
+            attributes: ['id', 'nom', 'prenom']
           }
         ],
         order: [['created_at', 'DESC']],
