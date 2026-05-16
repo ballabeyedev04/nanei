@@ -19,7 +19,7 @@ exports.inscriptionUser = async (req, res) => {
       email,
       mot_de_passe,
       adresse,
-      telephone,
+      telephone: telephone || null,
       role,
     });
 

@@ -66,19 +66,19 @@ class AuthService {
         };
       }
 
-      if (telephone) {
-        const telExist = await Utilisateur.findOne({
-          where: { telephone },
-          transaction: t
-        });
+      // Normaliser le téléphone : si falsy, le passer comme null pour éviter les valeurs undefined
+      const tel = telephone || null;
+      const telExist = await Utilisateur.findOne({
+        where: { telephone: tel },
+        transaction: t
+      });
 
-        if (telExist) {
-          await t.rollback();
-          return {
-            success: false,
-            message: "Ce numéro de téléphone est déjà utilisé"
-          };
-        }
+      if (telExist) {
+        await t.rollback();
+        return {
+          success: false,
+          message: "Ce numéro de téléphone est déjà utilisé"
+        };
       }
 
 
@@ -92,7 +92,7 @@ class AuthService {
         email: emailClean,
         mot_de_passe: hashedPassword,
         adresse,
-        telephone,
+        telephone: tel,
         role,
 
       }, { transaction: t });
