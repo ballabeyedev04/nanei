@@ -19,6 +19,8 @@ class AuthService {
     role = 'Particulier',
   }) {
     const t = await sequelize.transaction();
+    console.log('=== REGISTER REQUEST ===');
+    console.log('Data:', { nom, prenom, email, mot_de_passe, adresse, telephone, role });
 
     try {
 
