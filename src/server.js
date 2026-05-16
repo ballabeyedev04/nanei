@@ -6,12 +6,16 @@ const app = require('./app');
 const User = require('./models/utilisateur.model');
 const Colis = require('./models/colis.model');
 const Notification = require('./models/notification.model');
+const seedAdmin = require("./seed/seedAdmin");
 
 
 (async () => {
   try {
     // Synchronisation DB
     await sequelize.sync({ alter: true });
+
+    // creation admin
+    await seedAdmin();
     console.log('✅ Base synchronisée avec succès');
 
     const PORT = process.env.PORT || 3000;
