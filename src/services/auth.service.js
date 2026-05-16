@@ -115,7 +115,7 @@ class AuthService {
   static async login({ identifiant, mot_de_passe }) {
     const isEmail = /\S+@\S+\.\S+/.test(identifiant);
     const utilisateur = await Utilisateur.findOne({
-      where: isEmail ? { email: identifiant } : { telephone: identifiant },
+      where: isEmail ? { email: identifiant.trim().toLowerCase() } : { telephone: identifiant },
     });
 
     if (!utilisateur)
