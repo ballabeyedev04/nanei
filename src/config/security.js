@@ -32,7 +32,7 @@ const rateLimitConfig = {
  */
 const corsConfig = {
   origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 };
