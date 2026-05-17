@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const Utilisateur = require('../../models/utilisateur.model');
 
 class GestionUtilisateurService {
