@@ -90,3 +90,8 @@ exports.nombreUtilisateursParticuliers = async (req, res) => {
     });
   }
 };
+
+//hello world
+export const hello = (req, res) => {
+  res.send('Hello World!');
+};

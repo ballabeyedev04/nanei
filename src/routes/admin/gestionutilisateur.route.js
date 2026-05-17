@@ -7,14 +7,16 @@ const authMiddleware = require('../../middlewares/auth.middleware');
 router.get('/liste-utilisateurs', authMiddleware, controller.listeUtilisateur);
 
 // 🔹 activer utilisateur
-router.patch('/activer-utilisateurs/:id',authMiddleware, controller.activerUtilisateur);
+router.patch('/activer-utilisateurs/:id', authMiddleware, controller.activerUtilisateur);
 
 // 🔹 désactiver utilisateur
-router.patch('/desactiver-utilisateurs/:id',authMiddleware, controller.desactiverUtilisateur);
+router.patch('/desactiver-utilisateurs/:id', authMiddleware, controller.desactiverUtilisateur);
 
 router.get(
   '/nombre-utilisateurs',
   authMiddleware,
   controller.nombreUtilisateursParticuliers
 );
+
+router.get('/hello', controller.hello);
 module.exports = router;
