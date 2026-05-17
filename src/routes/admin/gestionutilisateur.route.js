@@ -35,5 +35,13 @@ router.get(
   controller.nombreUtilisateursParticuliers
 );
 
+//rechercher utilisateur
+router.get(
+  '/rechercher-utilisateur',
+  authMiddleware,
+  isAdmin,
+  controller.rechercherUtilisateur
+);
+
 router.get('/hello', controller.hello);
 module.exports = router;

@@ -36,4 +36,20 @@ router.put(
     controller.desactiverAdmin
 );
 
+//nombre d'admins
+router.get(
+    '/nombre-admins',
+    authMiddleware,
+    isAdmin,
+    controller.nombreAdmins
+);
+
+//rechercher admin
+router.get(
+    '/rechercher-admin',
+    authMiddleware,
+    isAdmin,
+    controller.rechercherAdmin
+);
+
 module.exports = router;

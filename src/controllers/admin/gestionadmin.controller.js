@@ -88,3 +88,37 @@ exports.desactiverAdmin = async (req, res) => {
         });
     }
 };
+
+// ===================== NOMBRE ADMINS =====================
+exports.nombreAdmins = async (req, res) => {
+    try {
+        const result = await GestionAdminService.nombreAdmins();
+
+        return res.status(200).json(result);
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Erreur serveur lors du comptage",
+            error: error.message
+        });
+    }
+};
+
+// ===================== RECHERCHER ADMIN =====================
+exports.rechercherAdmin = async (req, res) => {
+    try {
+        const { nom, prenom, email } = req.query;
+
+        const result = await GestionAdminService.rechercherAdmin({ nom, prenom, email });
+
+        return res.status(200).json(result);
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Erreur serveur lors de la recherche",
+            error: error.message
+        });
+    }
+};

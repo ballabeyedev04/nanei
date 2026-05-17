@@ -99,4 +99,24 @@ exports.hello = async (req, res) => {
   });
 };
 
-//modifier password 
+//rechercher utilisateur
+exports.rechercherUtilisateur = async (req, res) => {
+  try {
+    const { nom, prenom, email } = req.query;
+
+    const utilisateur = await GestionUtilisateurService.rechercherUtilisateur({ nom, prenom, email });
+
+    return res.status(200).json({
+      success: true,
+      data: utilisateur
+    });
+
+  } catch (error) {
+    console.error('Erreur recherche utilisateur:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};

@@ -2,23 +2,23 @@ const Utilisateur = require('../../models/utilisateur.model');
 
 class GestionUtilisateurService {
 
-    // 🔹 Lister utilisateurs Particuliers
-    static async listeUtilisateur() {
+  // 🔹 Lister utilisateurs Particuliers
+  static async listeUtilisateur() {
     try {
-        const utilisateurs = await Utilisateur.findAll({
+      const utilisateurs = await Utilisateur.findAll({
         where: {
-            role: 'Particulier'
+          role: 'Particulier'
         },
         attributes: { exclude: ['mot_de_passe'] },
         order: [['created_at', 'DESC']]
-        });
+      });
 
-        return utilisateurs;
+      return utilisateurs;
 
     } catch (error) {
-        throw new Error('Erreur lors de la récupération des utilisateurs');
+      throw new Error('Erreur lors de la récupération des utilisateurs');
     }
-    }
+  }
 
 
   // 🔹 Activer utilisateur
@@ -70,20 +70,42 @@ class GestionUtilisateurService {
   }
 
   // 🔹 Nombre d’utilisateurs particuliers
-    static async nombreUtilisateursParticuliers() {
+  static async nombreUtilisateursParticuliers() {
     try {
-        const total = await Utilisateur.count({
+      const total = await Utilisateur.count({
         where: {
-            role: 'Particulier'
+          role: 'Particulier'
         }
-        });
+      });
 
-        return total;
+      return total;
 
     } catch (error) {
-        throw new Error('Erreur lors du comptage des utilisateurs');
+      throw new Error('Erreur lors du comptage des utilisateurs');
     }
+  }
+
+  // 🔹 Rechercher utilisateur
+  static async rechercherUtilisateur({ nom, prenom, email }) {
+    try {
+      const where = { role: 'Particulier' };
+
+      if (nom) where.nom = { [Op.like]: `%${nom}%` };
+      if (prenom) where.prenom = { [Op.like]: `%${prenom}%` };
+      if (email) where.email = { [Op.like]: `%${email}%` };
+
+      const utilisateurs = await Utilisateur.findAll({
+        where,
+        attributes: { exclude: ['mot_de_passe'] },
+        order: [['created_at', 'DESC']]
+      });
+
+      return utilisateurs;
+
+    } catch (error) {
+      throw new Error('Erreur lors de la recherche des utilisateurs');
     }
+  }
 
 }
 

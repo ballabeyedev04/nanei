@@ -161,6 +161,53 @@ class GestionAdminService {
             };
         }
     }
+
+    // ===================== NOMBRE ADMINS =====================
+    static async nombreAdmins() {
+        try {
+            const total = await Utilisateur.count({
+                where: { role: 'Admin' }
+            });
+
+            return {
+                success: true,
+                data: total
+            };
+
+        } catch (error) {
+            return {
+                success: false,
+                message: "Erreur lors du comptage des admins",
+                error: error.message
+            };
+        }
+    }
+
+    // ===================== RECHERCHER ADMIN =====================
+    static async rechercherAdmin({ nom, prenom, email }) {
+        try {
+            const where = { role: 'Admin' };
+
+            if (nom) where.nom = { [Op.like]: `%${nom}%` };
+            if (prenom) where.prenom = { [Op.like]: `%${prenom}%` };
+            if (email) where.email = { [Op.like]: `%${email}%` };
+
+            const admins = await Utilisateur.findAll({
+                where,
+                attributes: { exclude: ['mot_de_passe'] },
+                order: [['created_at', 'DESC']]
+            });
+
+            return admins;
+
+        } catch (error) {
+            return {
+                success: false,
+                message: "Erreur lors de la recherche des admins",
+                error: error.message
+            };
+        }
+    }
 }
 
 module.exports = GestionAdminService;
