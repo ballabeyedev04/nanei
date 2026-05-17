@@ -237,58 +237,71 @@ class AuthService {
   static async modifierProfil(id, nom, prenom, email, telephone, adresse) {
     try {
       const utilisateur = await Utilisateur.findByPk(id);
+
       if (!utilisateur) {
         return {
           success: false,
-          message: 'Utilisateur non trouvé'
+          message: "Utilisateur non trouvé"
         };
       }
 
-      utilisateur.nom = nom;
-      utilisateur.prenom = prenom;
+      // NOM / PRENOM (safe update)
+      if (nom !== undefined) utilisateur.nom = nom;
+      if (prenom !== undefined) utilisateur.prenom = prenom;
 
-      // si email est fourni, vérifier qu'il n'est pas déjà pris par un AUTRE utilisateur
-      if (email) {
+      // EMAIL (avec exclusion utilisateur courant)
+      if (email && email !== utilisateur.email) {
         const emailClean = email.trim().toLowerCase();
+
         const emailExist = await Utilisateur.findOne({
           where: {
             email: emailClean,
             id: { [Op.ne]: id }
           }
         });
+
         if (emailExist) {
           return {
             success: false,
-            message: 'Cet email est déjà associé à un autre compte'
+            message: "Cet email est déjà associé à un autre compte"
           };
         }
+
         utilisateur.email = emailClean;
       }
 
-      // si téléphone est fourni, vérifier qu'il n'est pas déjà pris par un AUTRE utilisateur
-      if (telephone) {
+      // TELEPHONE (avec exclusion utilisateur courant)
+      if (telephone && telephone !== utilisateur.telephone) {
         const telExist = await Utilisateur.findOne({
           where: {
             telephone,
             id: { [Op.ne]: id }
           }
         });
+
         if (telExist) {
           return {
             success: false,
-            message: 'Ce numéro de téléphone est déjà associé à un autre compte'
+            message: "Ce numéro est déjà associé à un autre compte"
           };
         }
+
         utilisateur.telephone = telephone;
       }
 
-      utilisateur.adresse = adresse;
+      // ADRESSE
+      if (adresse !== undefined) {
+        utilisateur.adresse = adresse;
+      }
+
       await utilisateur.save();
+
       return {
         success: true,
-        message: 'Profil modifié avec succès',
+        message: "Profil modifié avec succès",
         utilisateur
       };
+
     } catch (error) {
       throw error;
     }
