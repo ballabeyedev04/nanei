@@ -121,7 +121,8 @@ exports.modifierProfil = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: result.message
+      message: result.message,
+      utilisateur: formatUser(result.utilisateur)
     });
 
   } catch (error) {

@@ -247,29 +247,47 @@ class AuthService {
       utilisateur.nom = nom;
       utilisateur.prenom = prenom;
 
-      //si email existe deja 
-      const emailExist = await Utilisateur.findOne({ where: { email } });
-      if (emailExist) {
-        return {
-          success: false,
-          message: 'Email existe deja'
-        };
+      // si email est fourni, vérifier qu'il n'est pas déjà pris par un AUTRE utilisateur
+      if (email) {
+        const emailClean = email.trim().toLowerCase();
+        const emailExist = await Utilisateur.findOne({
+          where: {
+            email: emailClean,
+            id: { [Op.ne]: id }
+          }
+        });
+        if (emailExist) {
+          return {
+            success: false,
+            message: 'Cet email est déjà associé à un autre compte'
+          };
+        }
+        utilisateur.email = emailClean;
       }
-      utilisateur.email = email;
-      //telephone exist deja
-      const telExist = await Utilisateur.findOne({ where: { telephone } });
-      if (telExist) {
-        return {
-          success: false,
-          message: 'Telephone existe deja'
-        };
+
+      // si téléphone est fourni, vérifier qu'il n'est pas déjà pris par un AUTRE utilisateur
+      if (telephone) {
+        const telExist = await Utilisateur.findOne({
+          where: {
+            telephone,
+            id: { [Op.ne]: id }
+          }
+        });
+        if (telExist) {
+          return {
+            success: false,
+            message: 'Ce numéro de téléphone est déjà associé à un autre compte'
+          };
+        }
+        utilisateur.telephone = telephone;
       }
-      utilisateur.telephone = telephone;
+
       utilisateur.adresse = adresse;
       await utilisateur.save();
       return {
         success: true,
-        message: 'Profil modifié avec succès'
+        message: 'Profil modifié avec succès',
+        utilisateur
       };
     } catch (error) {
       throw error;
