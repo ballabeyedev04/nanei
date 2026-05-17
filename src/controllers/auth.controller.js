@@ -64,3 +64,94 @@ exports.login = async (req, res) => {
     });
   }
 };
+
+//modifier password 
+exports.modifierPassword = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ancienPassword, nouveauPassword } = req.body;
+
+    const result = await UtilisateurService.modifierPassword(
+      id,
+      nouveauPassword,
+      ancienPassword
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: result.message
+    });
+
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+exports.modifierProfil = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nom, prenom, email, telephone, adresse } = req.body;
+
+    const result = await UtilisateurService.modifierProfil(
+      id,
+      nom,
+      prenom,
+      email,
+      telephone,
+      adresse
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: result.message
+    });
+
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+exports.oublierPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const result = await UtilisateurService.oublierPassword(email);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message
+    });
+
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    const result = await UtilisateurService.resetPassword(token, password);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message
+    });
+
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
