@@ -92,6 +92,9 @@ exports.nombreUtilisateursParticuliers = async (req, res) => {
 };
 
 //hello world
-export const hello = (req, res) => {
-  res.send('Hello World!');
+exports.hello = async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "Hello World!"
+  });
 };
