@@ -5,6 +5,7 @@ const { jwtConfig, bcryptConfig } = require('../config/security');
 const sequelize = require('../config/db');
 const { uploadImage } = require('../middlewares/uploadService'); // ton upload vers Cloudinary
 const crypto = require("crypto");
+const { Op } = require('sequelize');
 
 class AuthService {
 

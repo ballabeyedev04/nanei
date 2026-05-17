@@ -71,11 +71,19 @@ exports.modifierPassword = async (req, res) => {
     const { id } = req.params;
     const { ancienPassword, nouveauPassword } = req.body;
 
-    const result = await UtilisateurService.modifierPassword(
+    const result = await AuthService.modifierPassword(
       id,
       nouveauPassword,
       ancienPassword
     );
+
+    // Si le service indique une erreur métier (success = false), renvoyer statut 400
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.message
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -95,7 +103,7 @@ exports.modifierProfil = async (req, res) => {
     const { id } = req.params;
     const { nom, prenom, email, telephone, adresse } = req.body;
 
-    const result = await UtilisateurService.modifierProfil(
+    const result = await AuthService.modifierProfil(
       id,
       nom,
       prenom,
@@ -103,6 +111,13 @@ exports.modifierProfil = async (req, res) => {
       telephone,
       adresse
     );
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.message
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -121,7 +136,14 @@ exports.oublierPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
-    const result = await UtilisateurService.oublierPassword(email);
+    const result = await AuthService.oublierPassword(email);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.message
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -141,7 +163,14 @@ exports.resetPassword = async (req, res) => {
     const { token } = req.params;
     const { password } = req.body;
 
-    const result = await UtilisateurService.resetPassword(token, password);
+    const result = await AuthService.resetPassword(token, password);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.message
+      });
+    }
 
     return res.status(200).json({
       success: true,
