@@ -1,33 +1,34 @@
-const { Colis, Utilisateur, Notifications} = require('../../models');
+const { Colis, Utilisateur, Notifications } = require('../../models');
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
+const { sendSMS } = require('../sms.service');
 
 class EnvoieColisService {
 
   // 🔹 Générer référence
-static async genererReferenceColis() {
+  static async genererReferenceColis() {
 
-  let reference;
-  let existe = true;
+    let reference;
+    let existe = true;
 
-  while (existe) {
+    while (existe) {
 
-    const annee = new Date().getFullYear();
-    const random = crypto.randomBytes(3).toString('hex').toUpperCase();
-    const time = Date.now().toString().slice(-4);
+      const annee = new Date().getFullYear();
+      const random = crypto.randomBytes(3).toString('hex').toUpperCase();
+      const time = Date.now().toString().slice(-4);
 
-    reference = `COL-${annee}-${random}-${time}`;
+      reference = `COL-${annee}-${random}-${time}`;
 
-    const colis = await Colis.findOne({ where: { reference } });
+      const colis = await Colis.findOne({ where: { reference } });
 
-    if (!colis) {
-      existe = false;
+      if (!colis) {
+        existe = false;
+      }
     }
-  }
 
-  return reference;
-}
+    return reference;
+  }
 
   // 🔹 Créer colis
   static async envoieColis({
@@ -71,6 +72,14 @@ static async genererReferenceColis() {
       }, { transaction });
 
       await transaction.commit();
+
+      // ✅ Envoi du SMS de notification au destinataire via l'API Orange (non-bloquant)
+      if (recepteur.telephone) {
+        const messageText = `Bonjour ${recepteur.prenom} ${recepteur.nom}, vous allez recevoir le colis reference : ${colis.reference} chez Franco Mali Ship. Merci de votre confiance !`;
+        sendSMS(recepteur.telephone, messageText).catch(err => {
+          console.error("⚠️ Échec d'envoi du SMS de notification Orange :", err);
+        });
+      }
 
       return {
         success: true,
@@ -256,7 +265,7 @@ static async genererReferenceColis() {
     }
   }
 
-   static async marquerNotificationCommeLue(notificationId) {
+  static async marquerNotificationCommeLue(notificationId) {
     try {
       const notif = await Notifications.findByPk(notificationId);
       if (!notif) {
