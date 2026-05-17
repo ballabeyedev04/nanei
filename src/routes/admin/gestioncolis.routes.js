@@ -76,21 +76,21 @@ router.put(
     '/changer-statut-en-attente/:id',
     authMiddleware,
     isAdmin,
-    gestionColisController.changerEnAttente
+    controller.changerEnAttente
 );
 
 // marquer livré
 router.put(
-    'changer-statut-livre/:id',
+    '/changer-statut-livre/:id',
     authMiddleware,
     isAdmin,
-    gestionColisController.changerEnLivre
+    controller.changerEnLivre
 );
 // marquer récupéré
 router.put(
     '/changer-statut-recupere/:id',
     authMiddleware,
     isAdmin,
-    gestionColisController.changerEnRecupere
+    controller.changerEnRecupere
 );
 module.exports = router;
