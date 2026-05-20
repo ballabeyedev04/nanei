@@ -2,7 +2,7 @@ const { Colis, Utilisateur, Notifications } = require('../../models');
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
-const { sendSMS } = require('../sms.service');
+const { sendSMS } = require('../twilio.service');
 
 class EnvoieColisService {
 
@@ -73,11 +73,11 @@ class EnvoieColisService {
 
       await transaction.commit();
 
-      // ✅ Envoi du SMS de notification au destinataire via l'API Orange (non-bloquant)
+      // ✅ Envoi du SMS de notification au destinataire via l'API Twilio (non-bloquant)
       if (recepteur.telephone) {
         const messageText = `Bonjour ${recepteur.prenom} ${recepteur.nom}, vous allez recevoir le colis reference : ${colis.reference} chez Franco Mali Ship. Merci de votre confiance !`;
         sendSMS(recepteur.telephone, messageText).catch(err => {
-          console.error("⚠️ Échec d'envoi du SMS de notification Orange :", err);
+          console.error("⚠️ Échec d'envoi du SMS de notification Twilio :", err);
         });
       }
 
