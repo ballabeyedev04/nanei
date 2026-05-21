@@ -74,12 +74,22 @@ class EnvoieColisService {
       await transaction.commit();
 
       // ✅ Envoi du SMS de notification au destinataire via l'API Twilio (non-bloquant)
+
       if (recepteur.telephone) {
-        const messageText = `Bonjour ${recepteur.prenom} ${recepteur.nom}, vous allez recevoir le colis reference : ${colis.reference} chez Franco Mali Ship. Merci de votre confiance !`;
-        sendSMS(recepteur.telephone, messageText).catch(err => {
-          console.error("⚠️ Échec d'envoi du SMS de notification Twilio :", err);
-        });
-      }
+  console.log("Début SMS");
+          const messageText = `Bonjour ${recepteur.prenom} ${recepteur.nom}, vous allez recevoir le colis reference : ${colis.reference} chez Franco Mali Ship. Merci de votre confiance !`;
+
+
+  sendSMS(recepteur.telephone, messageText)
+    .then(res => {
+      console.log("Résultat SMS :", res);
+    })
+    .catch(err => {
+      console.error("Erreur SMS :", err);
+    });
+
+  console.log("Fin lancement SMS");
+}
 
       return {
         success: true,
