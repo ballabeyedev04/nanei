@@ -1,5 +1,9 @@
 const AuthService = require('../services/auth.service');
 const formatUser = require('../utils/formatUser');
+const jwt = require('jsonwebtoken');
+const { jwtConfig } = require('../config/security');
+const RefreshToken = require('../models/refreshToken.model');
+const crypto = require('crypto');
 
 exports.inscriptionUser = async (req, res) => {
   const {
@@ -130,6 +134,59 @@ exports.modifierProfil = async (req, res) => {
       success: false,
       message: error.message
     });
+  }
+};
+
+exports.refresh = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(400).json({ message: 'Refresh token manquant' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const stored = await RefreshToken.findOne({ where: { tokenHash, revoked: false } });
+    if (!stored) {
+      return res.status(401).json({ message: 'Refresh token invalide ou révoqué' });
+    }
+
+    if (new Date() > stored.expiresAt) {
+      await stored.destroy();
+      return res.status(401).json({ message: 'Refresh token expiré' });
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(refreshToken, jwtConfig.refreshSecret);
+    } catch {
+      await stored.destroy();
+      return res.status(401).json({ message: 'Refresh token invalide' });
+    }
+
+    const newToken = jwt.sign(
+      { id: payload.id, role: payload.role },
+      jwtConfig.secret,
+      { expiresIn: jwtConfig.expiresIn }
+    );
+
+    return res.status(200).json({ token: newToken });
+  } catch (err) {
+    console.error('Erreur refresh:', err);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+      const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+      await RefreshToken.update({ revoked: true }, { where: { tokenHash } });
+    }
+    return res.status(200).json({ message: 'Déconnexion réussie' });
+  } catch (err) {
+    console.error('Erreur logout:', err);
+    return res.status(500).json({ message: 'Erreur serveur' });
   }
 };
 
