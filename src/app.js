@@ -25,6 +25,7 @@ const envoieColisRoutes = require('./routes/client/envoieColis.route');
 const gestionUtilisateurRoutes = require('./routes/admin/gestionutilisateur.route');
 const gestionColisRoutes = require('./routes/admin/gestioncolis.routes');
 const gestionAdminRoutes = require('./routes/admin/gestionadmin.route');
+const messageClientRoutes = require('./routes/messageClient.route');
 
 // Serveur fichiers statiques pour les uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -36,4 +37,5 @@ app.use('/francomaliship/client', envoieColisRoutes);
 app.use('/francomaliship/admin', gestionUtilisateurRoutes);
 app.use('/francomaliship/admin', gestionColisRoutes);
 app.use('/francomaliship/admin', gestionAdminRoutes);
+app.use('/francomaliship/messages', messageClientRoutes);
 module.exports = app;

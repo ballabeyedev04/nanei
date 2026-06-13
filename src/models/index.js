@@ -2,6 +2,7 @@
 const Utilisateur = require('./utilisateur.model');
 const Colis = require('./colis.model');
 const Notifications = require('./notification.model');
+const MessageClient = require('./messageClient.model');
 
 // 🔹 Associations Colis
 Utilisateur.hasMany(Colis, { foreignKey: 'expediteurId', as: 'colisEnvoyes' });
@@ -21,5 +22,6 @@ Utilisateur.hasMany(Notifications, { foreignKey: 'recepteurId', as: 'notificatio
 module.exports = {
   Utilisateur,
   Colis,
-  Notifications
+  Notifications,
+  MessageClient,
 };

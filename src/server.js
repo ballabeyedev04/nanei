@@ -6,6 +6,7 @@ const app = require('./app');
 const User = require('./models/utilisateur.model');
 const Colis = require('./models/colis.model');
 const Notification = require('./models/notification.model');
+const MessageClient = require('./models/messageClient.model');
 const seedAdmin = require("./seed/seedAdmin");
 
 
