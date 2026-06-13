@@ -6,6 +6,7 @@ const formatUser = (utilisateur) => ({
   adresse: utilisateur.adresse,
   telephone: utilisateur.telephone,
   role: utilisateur.role,
+  statut: utilisateur.statut
 });
 
 module.exports = formatUser;

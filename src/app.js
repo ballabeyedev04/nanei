@@ -7,6 +7,9 @@ const { corsConfig, rateLimitConfig } = require('./config/security');
 
 const app = express();
 
+// Render.com utilise un reverse proxy — nécessaire pour express-rate-limit
+app.set('trust proxy', 1);
+
 // Middlewares globaux
 app.use(helmet());
 app.use(cors(corsConfig));

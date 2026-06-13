@@ -1,0 +1,80 @@
+services:
+
+  # ─────────────────────────────────────────
+  # Base de données PostgreSQL
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: francomaliship_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-francomali}
+      POSTGRES_USER: ${DB_USER:-francouser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-francopassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-francouser} -d ${DB_NAME:-francomali}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Backend Node.js
+  # ─────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: francomaliship_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+
+      # Base de données — pointe vers le service postgres ci-dessus
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-francomali}
+      DB_USER: ${DB_USER:-francouser}
+      DB_PASSWORD: ${DB_PASSWORD:-francopassword}
+
+      # JWT — les 3 secrets DOIVENT être différents
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_RESET_SECRET: ${JWT_RESET_SECRET}
+
+      # CORS
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      FRONTEND_URL: ${FRONTEND_URL}
+
+      # Email
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+
+      # SMS Orange
+      ORANGE_SMS_CLIENT_ID: ${ORANGE_SMS_CLIENT_ID}
+      ORANGE_SMS_CLIENT_SECRET: ${ORANGE_SMS_CLIENT_SECRET}
+      ORANGE_SMS_SENDER_NUMBER: ${ORANGE_SMS_SENDER_NUMBER}
+      ORANGE_SMS_SENDER_NAME: ${ORANGE_SMS_SENDER_NAME}
+
+      # Twilio
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+
+    volumes:
+      - ./uploads:/app/uploads
+
+volumes:
+  postgres_data:

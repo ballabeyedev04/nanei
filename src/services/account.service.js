@@ -1,163 +1,152 @@
 const Utilisateur = require('../models/utilisateur.model');
-const bcrypt = require('bcryptjs');
-const sequelize = require('../config/db');
-const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
-const { jwtConfig } = require('../config/security');
-const { sendEmail } = require('../utils/mailer');
-const resetPasswordTemplate = require('../templates/mail/resetPassword.template');
-
+const UserOtp     = require('../models/userOtp.model');
+const bcrypt      = require('bcryptjs');
+const crypto      = require('crypto');
+const sequelize   = require('../config/db');
+const { bcryptConfig } = require('../config/security');
+const { sendOtpEmail } = require('./resend.service');
 
 class AccountService {
 
-  // -------------------- MOT DE PASSE OUBLIÉ --------------------
+  // ── PROFIL COURANT ────────────────────────────────────────────────────────────
+  static async getMe(userId) {
+    const utilisateur = await Utilisateur.findByPk(userId, {
+      attributes: { exclude: ['mot_de_passe'] }
+    });
+    if (!utilisateur) return { success: false, message: 'Utilisateur introuvable' };
+    return { success: true, utilisateur };
+  }
+
+  // ── MOT DE PASSE OUBLIÉ (OTP par email) ──────────────────────────────────────
+  static _generateOtp(length = 8) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let otp = '';
+    const bytes = crypto.randomBytes(length);
+    for (let i = 0; i < length; i++) {
+      otp += chars[bytes[i] % chars.length];
+    }
+    return otp;
+  }
+
   static async forgotPassword(email) {
     try {
       const utilisateur = await Utilisateur.findOne({ where: { email } });
       if (!utilisateur) {
-        return { error: "Aucun compte trouvé avec cet email." };
+        // Réponse générique — ne révèle pas si le compte existe
+        return { message: "Si un compte existe avec cet email, un code de réinitialisation a été envoyé." };
       }
 
-      //Générer un token temporaire pour réinitialisation (valide 1h)
-      const resetToken = jwt.sign(
-        { id: utilisateur.id },
-        jwtConfig.secret,
-        { expiresIn: '1h' }
-      );
+      const otp       = AccountService._generateOtp(8);
+      const otpHash   = await bcrypt.hash(otp, bcryptConfig.saltRounds);
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
 
-      //Construire le lien de réinitialisation (frontend)
-      const resetLink = `${process.env.FRONTEND_URL}/account/reset-password?token=${resetToken}`;
+      // Supprimer l'ancien OTP si existant, puis créer le nouveau
+      await UserOtp.destroy({ where: { utilisateurId: utilisateur.id } });
+      await UserOtp.create({ utilisateurId: utilisateur.id, otpHash, expiresAt });
 
-      //Configurer Nodemailer (SMTP ou Gmail)
-      const html = resetPasswordTemplate({
-            nom: utilisateur.nom,
-            resetLink
-        });
+      await sendOtpEmail({ to: email, nom: utilisateur.nom, otp });
 
-      //Envoyer l'email
-      await sendEmail({
-        to: email,
-        subject: "Réinitialisation de votre mot de passe",
-        html
-    });
-
-      return { message: "Email de réinitialisation envoyé. Vérifiez votre boîte mail."};
-
+      return { message: "Un code de réinitialisation a été envoyé à votre adresse email." };
     } catch (error) {
       console.error('Erreur forgotPassword:', error);
       throw error;
     }
   }
 
-  // -------------------- CHANGER MOT DE PASSE --------------------
+  // ── RÉINITIALISATION MOT DE PASSE (OTP) ──────────────────────────────────────
+  static async resetPassword(email, otpRecu, newPassword) {
+    try {
+      const utilisateur = await Utilisateur.findOne({ where: { email } });
+      if (!utilisateur) {
+        return { error: 'Aucun compte trouvé avec cet email.' };
+      }
+
+      const otpRecord = await UserOtp.findOne({ where: { utilisateurId: utilisateur.id } });
+      if (!otpRecord) {
+        return { error: 'Aucun code de réinitialisation trouvé. Veuillez refaire la demande.' };
+      }
+
+      if (new Date() > otpRecord.expiresAt) {
+        await otpRecord.destroy();
+        return { error: 'Le code a expiré. Veuillez refaire la demande.' };
+      }
+
+      const isValid = await bcrypt.compare(otpRecu.toUpperCase().trim(), otpRecord.otpHash);
+      if (!isValid) {
+        return { error: 'Code incorrect. Vérifiez le code reçu par email.' };
+      }
+
+      utilisateur.mot_de_passe = await bcrypt.hash(newPassword, bcryptConfig.saltRounds);
+      await utilisateur.save();
+      await otpRecord.destroy();
+
+      return { message: 'Mot de passe réinitialisé avec succès.' };
+    } catch (error) {
+      console.error('Erreur resetPassword:', error);
+      throw error;
+    }
+  }
+
+  // ── CHANGER MOT DE PASSE ──────────────────────────────────────────────────────
   static async changePassword(userId, oldPassword, newPassword) {
     try {
-      // 1️⃣ Vérifier si l'utilisateur existe
       const utilisateur = await Utilisateur.findByPk(userId);
-      if (!utilisateur) {
-        return { error: "Utilisateur non trouvé." };
-      }
+      if (!utilisateur) return { error: "Utilisateur non trouvé." };
 
-      // 2️⃣ Vérifier l'ancien mot de passe
       const isMatch = await bcrypt.compare(oldPassword, utilisateur.mot_de_passe);
-      if (!isMatch) {
-        return { error: "Mot de passe actuel incorrect." };
-      }
+      if (!isMatch) return { error: "Mot de passe actuel incorrect." };
 
-      // 3️⃣ Vérifier la complexité du nouveau mot de passe
       if (newPassword.length < 8) {
         return { error: "Le mot de passe doit contenir au moins 8 caractères." };
       }
 
-      // 4️⃣ Hasher le nouveau mot de passe
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-      // 5️⃣ Mettre à jour le mot de passe
-      utilisateur.mot_de_passe = hashedPassword;
+      utilisateur.mot_de_passe = await bcrypt.hash(newPassword, bcryptConfig.saltRounds);
       await utilisateur.save();
 
-      return {
-        message: "Mot de passe modifié avec succès."
-      };
-
+      return { message: "Mot de passe modifié avec succès." };
     } catch (error) {
       console.error("Erreur changePassword:", error);
       throw error;
     }
   }
 
-  // Modifier informations personnelles
+  // ── MODIFIER PROFIL ───────────────────────────────────────────────────────────
   static async updateProfile({ userId, data }) {
-    const { nom, prenom, email, telephone, adresse, photoProfil, carte_identite_national_num} = data;
+    const { nom, prenom, email, telephone, adresse, photoProfil } = data;
+    const t = await sequelize.transaction();
+    try {
+      const utilisateur = await Utilisateur.findByPk(userId, { transaction: t });
+      if (!utilisateur) {
+        await t.rollback();
+        return { error: "Utilisateur non trouvé" };
+      }
 
-        const t = await sequelize.transaction();
-        try {
-            const utilisateur = await Utilisateur.findByPk(userId, { transaction: t });
-            if (!utilisateur) {
-                await t.rollback();
-                return { error: "Utilisateur non trouvé" };
-            }
+      if (email && email !== utilisateur.email) {
+        const exist = await Utilisateur.findOne({ where: { email }, transaction: t });
+        if (exist) { await t.rollback(); return { error: "Cet email est déjà utilisé" }; }
+        utilisateur.email = email;
+      }
 
-            // Vérification email
-            if (email && email !== utilisateur.email) {
-                const existEmail = await Utilisateur.findOne({
-                    where: { email },
-                    transaction: t
-            });
-            if (existEmail) {
-                await t.rollback();
-                return { error: "Cet email est déjà utilisé" };
-            }
-            utilisateur.email = email;
-            }
+      if (telephone && telephone !== utilisateur.telephone) {
+        const exist = await Utilisateur.findOne({ where: { telephone }, transaction: t });
+        if (exist) { await t.rollback(); return { error: "Ce numéro de téléphone est déjà utilisé" }; }
+        utilisateur.telephone = telephone;
+      }
 
-            // Vérification téléphone
-            if (telephone && telephone !== utilisateur.telephone) {
-            const existTel = await Utilisateur.findOne({
-                where: { telephone },
-                transaction: t
-            });
-            if (existTel) {
-                await t.rollback();
-                return { error: "Ce numéro de téléphone est déjà utilisé" };
-            }
-            utilisateur.telephone = telephone;
-            }
+      if (nom)       utilisateur.nom     = nom;
+      if (prenom)    utilisateur.prenom  = prenom;
+      if (adresse !== undefined) utilisateur.adresse = adresse;
+      if (photoProfil)           utilisateur.photoProfil = photoProfil;
 
-            // Vérification CIN
-            if (carte_identite_national_num && carte_identite_national_num !== utilisateur.carte_identite_national_num) {
-            const existCIN = await Utilisateur.findOne({
-                where: { carte_identite_national_num },
-                transaction: t
-            });
-            if (existCIN) {
-                await t.rollback();
-                return { error: "Le numéro CIN est déjà utilisé" };
-            }
-            utilisateur.carte_identite_national_num = carte_identite_national_num;
-            }
+      await utilisateur.save({ transaction: t });
+      await t.commit();
 
-            if (nom) utilisateur.nom = nom;
-            if (prenom) utilisateur.prenom = prenom;
-            if (adresse !== undefined) utilisateur.adresse = adresse;
-            if (photoProfil) utilisateur.photoProfil = photoProfil;
-            if (carte_identite_national_num) utilisateur.carte_identite_national_num = carte_identite_national_num;
-
-            await utilisateur.save({ transaction: t });
-            await t.commit();
-
-            return {
-                message: "Profil modifié avec succès",
-                utilisateur
-            };
-
-        } catch (error) {
-            await t.rollback();
-            throw error;
-        }
+      return { message: "Profil modifié avec succès", utilisateur };
+    } catch (error) {
+      await t.rollback();
+      throw error;
+    }
   }
-
 }
 
 module.exports = AccountService;
