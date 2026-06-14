@@ -26,6 +26,10 @@ const gestionUtilisateurRoutes = require('./routes/admin/gestionutilisateur.rout
 const gestionColisRoutes = require('./routes/admin/gestioncolis.routes');
 const gestionAdminRoutes = require('./routes/admin/gestionadmin.route');
 const messageClientRoutes = require('./routes/messageClient.route');
+const countryRoutes = require('./routes/admin/country.route');
+const shippingPriceRoutes = require('./routes/admin/shippingPrice.route');
+const servicePriceRoutes = require('./routes/admin/servicePrice.route');
+const pricingRoutes = require('./routes/pricing.route');
 
 // Serveur fichiers statiques pour les uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -38,4 +42,11 @@ app.use('/francomaliship/admin', gestionUtilisateurRoutes);
 app.use('/francomaliship/admin', gestionColisRoutes);
 app.use('/francomaliship/admin', gestionAdminRoutes);
 app.use('/francomaliship/messages', messageClientRoutes);
+
+// Pricing routes
+app.use('/francomaliship/admin/countries', countryRoutes);
+app.use('/francomaliship/admin/shipping-prices', shippingPriceRoutes);
+app.use('/francomaliship/admin/service-prices', servicePriceRoutes);
+app.use('/francomaliship/pricing', pricingRoutes);
+
 module.exports = app;

@@ -3,6 +3,9 @@ const Utilisateur = require('./utilisateur.model');
 const Colis = require('./colis.model');
 const Notifications = require('./notification.model');
 const MessageClient = require('./messageClient.model');
+const Country = require('./country.model');
+const ShippingPrice = require('./shippingPrice.model');
+const ServicePrice = require('./servicePrice.model');
 
 // 🔹 Associations Colis
 Utilisateur.hasMany(Colis, { foreignKey: 'expediteurId', as: 'colisEnvoyes' });
@@ -24,4 +27,7 @@ module.exports = {
   Colis,
   Notifications,
   MessageClient,
+  Country,
+  ShippingPrice,
+  ServicePrice,
 };
