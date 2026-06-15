@@ -14,7 +14,7 @@ module.exports = function otpPasswordTemplate({ nom, otp }) {
         <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
           <tr>
             <td style="background:linear-gradient(135deg,#0057A8,#003d78);padding:32px 40px;text-align:center;">
-              <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">FrancoMaliShip</h1>
+              <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">nanei</h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">Réinitialisation de mot de passe</p>
             </td>
           </tr>
@@ -35,7 +35,7 @@ module.exports = function otpPasswordTemplate({ nom, otp }) {
               </p>
               <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
               <p style="margin:0;color:#9ca3af;font-size:13px;text-align:center;">
-                © ${new Date().getFullYear()} FrancoMaliShip — Ne répondez pas à cet email.
+                © ${new Date().getFullYear()} nanei — Ne répondez pas à cet email.
               </p>
             </td>
           </tr>

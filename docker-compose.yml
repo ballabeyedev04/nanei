@@ -5,7 +5,7 @@ services:
   # ─────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: francomaliship_postgres
+    container_name: nanei_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-francomali}
@@ -28,7 +28,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: francomaliship_backend
+    container_name: nanei_backend
     restart: unless-stopped
     depends_on:
       postgres:

@@ -2,7 +2,7 @@ const { Resend } = require('resend');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM = process.env.MAIL_FROM || 'FrancoMaliShip <onboarding@resend.dev>';
+const FROM = process.env.MAIL_FROM || 'nanei <onboarding@resend.dev>';
 const isProd = process.env.NODE_ENV === 'production';
 
 /**
@@ -33,7 +33,7 @@ async function sendOtpEmail({ to, nom, otp }) {
   const otpTemplate = require('../templates/mail/otpPassword.template');
   return sendEmail({
     to,
-    subject: 'Votre code de réinitialisation FrancoMaliShip',
+    subject: 'Votre code de réinitialisation nanei',
     html: otpTemplate({ nom, otp })
   });
 }

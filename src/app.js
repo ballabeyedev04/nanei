@@ -35,18 +35,18 @@ const pricingRoutes = require('./routes/pricing.route');
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Définition des routes
-app.use('/francomaliship/auth', authRoutes);
-app.use('/francomaliship/account', accountRoutes);
-app.use('/francomaliship/client', envoieColisRoutes);
-app.use('/francomaliship/admin', gestionUtilisateurRoutes);
-app.use('/francomaliship/admin', gestionColisRoutes);
-app.use('/francomaliship/admin', gestionAdminRoutes);
-app.use('/francomaliship/messages', messageClientRoutes);
+app.use('/nanei/auth', authRoutes);
+app.use('/nanei/account', accountRoutes);
+app.use('/nanei/client', envoieColisRoutes);
+app.use('/nanei/admin', gestionUtilisateurRoutes);
+app.use('/nanei/admin', gestionColisRoutes);
+app.use('/nanei/admin', gestionAdminRoutes);
+app.use('/nanei/messages', messageClientRoutes);
 
 // Pricing routes
-app.use('/francomaliship/admin/countries', countryRoutes);
-app.use('/francomaliship/admin/shipping-prices', shippingPriceRoutes);
-app.use('/francomaliship/admin/service-prices', servicePriceRoutes);
-app.use('/francomaliship/pricing', pricingRoutes);
+app.use('/nanei/admin/countries', countryRoutes);
+app.use('/nanei/admin/shipping-prices', shippingPriceRoutes);
+app.use('/nanei/admin/service-prices', servicePriceRoutes);
+app.use('/nanei/pricing', pricingRoutes);
 
 module.exports = app;
