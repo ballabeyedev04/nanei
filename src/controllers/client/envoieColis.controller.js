@@ -1,4 +1,7 @@
 const EnvoieColisService = require('../../services/client/envoieColis.service');
+const Country = require('../../models/country.model');
+const ShippingPrice = require('../../models/shippingPrice.model');
+const ServicePrice = require('../../models/servicePrice.model');
 
 // Contrôleur existant (envoi de colis)
 exports.envoieColisController = async (req, res) => {
@@ -135,6 +138,56 @@ exports.getNotificationsController = async (req, res) => {
       message: 'Erreur serveur lors de la récupération des notifications',
       erreur: err.message
     });
+  }
+};
+
+// 🔹 Liste des pays actifs (pour le mobile)
+exports.getCountriesController = async (req, res) => {
+  try {
+    const countries = await Country.findAll({
+      where: { isActive: true },
+      attributes: ['id', 'name', 'code'],
+      order: [['name', 'ASC']],
+    });
+    return res.status(200).json({ success: true, data: countries });
+  } catch (err) {
+    console.error('Erreur getCountries :', err);
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// 🔹 Prix shipping + services pour un pays (pour le mobile)
+exports.getPricingByCountryController = async (req, res) => {
+  try {
+    const { countryId } = req.params;
+
+    const country = await Country.findByPk(countryId, { attributes: ['id', 'name', 'code', 'isActive'] });
+    if (!country || !country.isActive) {
+      return res.status(404).json({ success: false, message: 'Pays non trouvé' });
+    }
+
+    const shippingPrices = await ShippingPrice.findAll({
+      where: { countryId },
+      attributes: ['id', 'type', 'minWeight', 'maxWeight', 'pricePerKg'],
+      order: [['type', 'ASC'], ['minWeight', 'ASC']],
+    });
+
+    const servicePrices = await ServicePrice.findAll({
+      where: { countryId },
+      attributes: ['id', 'serviceType', 'price'],
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        country: { id: country.id, name: country.name, code: country.code },
+        shippingPrices,
+        servicePrices,
+      },
+    });
+  } catch (err) {
+    console.error('Erreur getPricingByCountry :', err);
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
 

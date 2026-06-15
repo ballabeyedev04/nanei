@@ -6,6 +6,10 @@ const authMiddleware = require('../../middlewares/auth.middleware');
 // Route pour envoyer un colis (POST)
 router.post('/envoie-colis', authMiddleware, envoieColisController.envoieColisController);
 
+// Pays actifs + pricing (pour le mobile)
+router.get('/countries', authMiddleware, envoieColisController.getCountriesController);
+router.get('/pricing/:countryId', authMiddleware, envoieColisController.getPricingByCountryController);
+
 // Route pour rechercher un client par nom, prénom ou email (GET)
 router.get('/rechercher-client', authMiddleware, envoieColisController.rechercherClientController);
 
