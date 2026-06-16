@@ -52,13 +52,15 @@ exports.login = async (req, res) => {
   const { identifiant, mot_de_passe } = req.body;
 
   try {
-    const { token, utilisateur, error } = await AuthService.login({ identifiant, mot_de_passe });
+    const result = await AuthService.login({ identifiant, mot_de_passe });
 
-    if (error) return res.status(400).json({ message: error });
+    if (!result.success) {
+      return res.status(400).json({ message: result.error ?? result.message ?? 'Identifiants incorrects' });
+    }
 
     return res.status(200).json({
-      token,
-      utilisateur: formatUser(utilisateur)
+      token: result.token,
+      utilisateur: formatUser(result.utilisateur)
     });
   } catch (err) {
     console.error('Erreur connexion:', err);
