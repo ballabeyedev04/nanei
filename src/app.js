@@ -26,6 +26,7 @@ const gestionUtilisateurRoutes = require('./routes/admin/gestionutilisateur.rout
 const gestionColisRoutes = require('./routes/admin/gestioncolis.routes');
 const gestionAdminRoutes = require('./routes/admin/gestionadmin.route');
 const messageClientRoutes = require('./routes/messageClient.route');
+const messageClientAdminRoutes = require('./routes/admin/messageClient.admin.route');
 const countryRoutes = require('./routes/admin/country.route');
 const shippingPriceRoutes = require('./routes/admin/shippingPrice.route');
 const servicePriceRoutes = require('./routes/admin/servicePrice.route');
@@ -42,6 +43,7 @@ app.use('/nanei/admin', gestionUtilisateurRoutes);
 app.use('/nanei/admin', gestionColisRoutes);
 app.use('/nanei/admin', gestionAdminRoutes);
 app.use('/nanei/messages', messageClientRoutes);
+app.use('/nanei/admin/messages', messageClientAdminRoutes);
 
 // Pricing routes
 app.use('/nanei/admin/countries', countryRoutes);
