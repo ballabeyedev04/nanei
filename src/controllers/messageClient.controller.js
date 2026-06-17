@@ -35,3 +35,26 @@ exports.getTousMessages = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Erreur serveur.' });
   }
 };
+
+exports.getNombreMessages = async (req, res) => {
+  try {
+    const result = await messageClientService.getNombreMessages();
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur.' });
+  }
+};
+
+exports.repondreMessage = async (req, res) => {
+  try {
+    const { reponse } = req.body;
+    if (!reponse || !reponse.trim()) {
+      return res.status(400).json({ success: false, message: 'La réponse est requise.' });
+    }
+    const result = await messageClientService.repondreMessage(req.params.id, reponse.trim());
+    return res.status(200).json({ success: true, message: 'Réponse envoyée avec succès.', ...result });
+  } catch (error) {
+    const status = error.message === 'Message introuvable' ? 404 : 500;
+    return res.status(status).json({ success: false, message: error.message || 'Erreur serveur.' });
+  }
+};
