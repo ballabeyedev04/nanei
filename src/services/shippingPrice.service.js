@@ -244,6 +244,59 @@ class ShippingPriceService {
     }
   }
 
+  /**
+   * Crée ou met à jour les 2 lignes aérien + maritime pour une même tranche de poids.
+   * Body: { countryId, minWeight, maxWeight, aerienPricePerKg, maritimePricePerKg }
+   */
+  static async createOrUpdateBulk(data) {
+    try {
+      const { countryId, minWeight, maxWeight, aerienPricePerKg, maritimePricePerKg, aerienId, maritimeId } = data;
+
+      if (!countryId || minWeight === undefined || maxWeight === undefined || aerienPricePerKg === undefined || maritimePricePerKg === undefined) {
+        return { success: false, message: 'Tous les champs sont obligatoires' };
+      }
+      if (parseFloat(minWeight) >= parseFloat(maxWeight)) {
+        return { success: false, message: 'Le poids minimum doit être inférieur au poids maximum' };
+      }
+
+      const country = await Country.findByPk(countryId);
+      if (!country) return { success: false, message: 'Pays non trouvé' };
+
+      const results = [];
+      for (const { type, pricePerKg, existingId } of [
+        { type: 'aérien',    pricePerKg: aerienPricePerKg,   existingId: aerienId   },
+        { type: 'maritime',  pricePerKg: maritimePricePerKg, existingId: maritimeId },
+      ]) {
+        if (existingId) {
+          // Mise à jour
+          const existing = await ShippingPrice.findByPk(existingId);
+          if (existing) {
+            await existing.update({ countryId, type, minWeight, maxWeight, pricePerKg });
+            results.push(existing);
+          }
+        } else {
+          // Vérifie chevauchement
+          const overlap = await ShippingPrice.findOne({
+            where: {
+              countryId, type,
+              [Op.or]: [{ minWeight: { [Op.lt]: maxWeight }, maxWeight: { [Op.gt]: minWeight } }],
+            },
+          });
+          if (overlap) {
+            return { success: false, message: `Chevauchement de poids pour le type ${type}` };
+          }
+          const created = await ShippingPrice.create({ countryId, type, minWeight, maxWeight, pricePerKg });
+          results.push(created);
+        }
+      }
+
+      return { success: true, message: 'Tarifs créés/mis à jour avec succès', data: results };
+    } catch (error) {
+      console.error('Error in createOrUpdateBulk:', error);
+      return { success: false, message: 'Erreur serveur', error: error.message };
+    }
+  }
+
   static async deleteShippingPrice(id) {
     try {
       const price = await ShippingPrice.findByPk(id);

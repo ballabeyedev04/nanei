@@ -9,6 +9,7 @@ router.use(authMiddleware);
 router.get('/', shippingPriceController.getShippingPrices);
 router.get('/:id', shippingPriceController.getShippingPriceById);
 router.post('/', shippingPriceController.createShippingPrice);
+router.post('/bulk', shippingPriceController.createOrUpdateBulk);
 router.put('/:id', shippingPriceController.updateShippingPrice);
 router.delete('/:id', shippingPriceController.deleteShippingPrice);
 

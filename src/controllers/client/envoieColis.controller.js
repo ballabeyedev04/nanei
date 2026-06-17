@@ -2,6 +2,7 @@ const EnvoieColisService = require('../../services/client/envoieColis.service');
 const Country = require('../../models/country.model');
 const ShippingPrice = require('../../models/shippingPrice.model');
 const ServicePrice = require('../../models/servicePrice.model');
+const ShippingRateService = require('../../services/shippingRate.service');
 
 // Contrôleur existant (envoi de colis)
 exports.envoieColisController = async (req, res) => {
@@ -166,11 +167,18 @@ exports.getPricingByCountryController = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Pays non trouvé' });
     }
 
-    const shippingPrices = await ShippingPrice.findAll({
-      where: { countryId },
-      attributes: ['id', 'type', 'minWeight', 'maxWeight', 'pricePerKg'],
-      order: [['type', 'ASC'], ['minWeight', 'ASC']],
-    });
+    // Utilise le nouveau modèle ShippingRate (aérien + maritime en une ligne)
+    const rateData = await ShippingRateService.getPricingForCountry(countryId);
+    // Fallback vers l'ancien modèle ShippingPrice si pas encore migré
+    let shippingPrices = rateData ? rateData.shippingPrices : [];
+    if (!rateData) {
+      const oldPrices = await ShippingPrice.findAll({
+        where: { countryId },
+        attributes: ['id', 'type', 'minWeight', 'maxWeight', 'pricePerKg'],
+        order: [['type', 'ASC'], ['minWeight', 'ASC']],
+      });
+      shippingPrices = oldPrices;
+    }
 
     const servicePrices = await ServicePrice.findAll({
       where: { countryId },

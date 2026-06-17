@@ -88,6 +88,17 @@ exports.updateShippingPrice = async (req, res) => {
   }
 };
 
+exports.createOrUpdateBulk = async (req, res) => {
+  try {
+    const result = await ShippingPriceService.createOrUpdateBulk(req.body);
+    if (!result.success) return res.status(400).json(result);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Error in createOrUpdateBulk:', error);
+    return res.status(500).json({ message: 'Erreur serveur', error: error.message });
+  }
+};
+
 exports.deleteShippingPrice = async (req, res) => {
   try {
     const { id } = req.params;
