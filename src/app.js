@@ -31,9 +31,11 @@ const countryRoutes = require('./routes/admin/country.route');
 const shippingPriceRoutes = require('./routes/admin/shippingPrice.route');
 const shippingRateRoutes  = require('./routes/admin/shippingRate.route');
 const servicePriceRoutes = require('./routes/admin/servicePrice.route');
+const serviceRateRoutes  = require('./routes/admin/serviceRate.route');
 const pricingRoutes = require('./routes/pricing.route');
-// Charge le modèle ShippingRate pour la sync Sequelize
+// Charge les modèles pour la sync Sequelize
 require('./models/shippingRate.model');
+require('./models/serviceRate.model');
 
 // Serveur fichiers statiques pour les uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -53,6 +55,7 @@ app.use('/nanei/admin/countries', countryRoutes);
 app.use('/nanei/admin/shipping-prices', shippingPriceRoutes);
 app.use('/nanei/admin/shipping-rates',  shippingRateRoutes);
 app.use('/nanei/admin/service-prices', servicePriceRoutes);
+app.use('/nanei/admin/service-rates',  serviceRateRoutes);
 app.use('/nanei/pricing', pricingRoutes);
 
 module.exports = app;

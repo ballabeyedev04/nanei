@@ -3,6 +3,7 @@ const Country = require('../../models/country.model');
 const ShippingPrice = require('../../models/shippingPrice.model');
 const ServicePrice = require('../../models/servicePrice.model');
 const ShippingRateService = require('../../services/shippingRate.service');
+const ServiceRateService = require('../../services/serviceRate.service');
 
 // Contrôleur existant (envoi de colis)
 exports.envoieColisController = async (req, res) => {
@@ -180,10 +181,15 @@ exports.getPricingByCountryController = async (req, res) => {
       shippingPrices = oldPrices;
     }
 
-    const servicePrices = await ServicePrice.findAll({
-      where: { countryId },
-      attributes: ['id', 'serviceType', 'price'],
-    });
+    // Utilise le nouveau modèle ServiceRate (récupération + livraison en une ligne)
+    const rateServiceData = await ServiceRateService.getServicesForCountry(countryId);
+    let servicePrices = rateServiceData ? rateServiceData.servicePrices : [];
+    if (!rateServiceData) {
+      servicePrices = await ServicePrice.findAll({
+        where: { countryId },
+        attributes: ['id', 'serviceType', 'price'],
+      });
+    }
 
     return res.status(200).json({
       success: true,
