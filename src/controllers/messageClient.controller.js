@@ -1,4 +1,5 @@
 const messageClientService = require('../services/messageClient.service');
+const logger = require('../config/logger');
 
 exports.envoyerMessage = async (req, res) => {
   try {

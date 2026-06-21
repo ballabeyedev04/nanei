@@ -49,4 +49,10 @@ router.put(
   accountController.changePassword
 );
 
+// ── FCM Token ─────────────────────────────────────────────────────────────────
+router.post('/fcm-token', auth, accountController.updateFcmToken);
+
+// ── Suppression de compte (RGPD) ──────────────────────────────────────────────
+router.delete('/', auth, accountController.deleteAccount);
+
 module.exports = router;

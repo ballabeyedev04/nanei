@@ -1,6 +1,7 @@
 const dotenv = require('dotenv');
 dotenv.config();
 const twilio = require('twilio');
+const logger = require('../config/logger');
 
 /**
  * Formate un numéro de téléphone au format strict E.164 requis par Twilio (ex: +221773444444)
@@ -51,7 +52,7 @@ async function sendSMS(to, message) {
       throw new Error(`Numéro de destinataire invalide : ${to}`);
     }
 
-    console.log(`✉️ Twilio SMS Service : Initialisation de l'envoi à ${formattedTo}...`);
+    logger.debug('Twilio SMS: envoi en cours');
 
     const client = twilio(accountSid, authToken);
 
@@ -61,11 +62,11 @@ async function sendSMS(to, message) {
       to: formattedTo
     });
 
-    console.log(`🎉 Twilio SMS Service : SMS envoyé avec succès ! SID: ${response.sid}`);
+    logger.info('Twilio SMS envoyé', { sid: response.sid });
     return { success: true, sid: response.sid };
 
   } catch (error) {
-    console.error('⚠️ Twilio SMS Service [ERROR] :', error.message);
+    logger.error('Twilio SMS erreur', { error: error.message });
     return { success: false, error: error.message };
   }
 }

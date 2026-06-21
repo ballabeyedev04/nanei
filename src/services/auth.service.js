@@ -6,6 +6,7 @@ const sequelize = require('../config/db');
 const { uploadImage } = require('../middlewares/uploadService'); // ton upload vers Cloudinary
 const crypto = require("crypto");
 const { Op } = require('sequelize');
+const logger = require('../config/logger');
 
 class AuthService {
 
@@ -20,8 +21,7 @@ class AuthService {
     role = 'Particulier',
   }) {
     const t = await sequelize.transaction();
-    console.log('=== REGISTER REQUEST ===');
-    console.log('Data:', { nom, prenom, email, mot_de_passe, adresse, telephone, role });
+    logger.debug('Début inscription utilisateur', { nom, prenom, role });
 
     try {
 

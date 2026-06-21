@@ -1,6 +1,7 @@
 const ShippingPrice = require('../models/shippingPrice.model');
 const ServicePrice = require('../models/servicePrice.model');
 const Country = require('../models/country.model');
+const logger = require('../config/logger');
 
 class PricingCalculatorService {
   static async calculateShippingPrice(countryId, weight, type) {
@@ -76,7 +77,7 @@ class PricingCalculatorService {
         },
       };
     } catch (error) {
-      console.error('Error calculating shipping price:', error);
+      logger.error('Erreur calculShippingPrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors du calcul du prix de transport',
@@ -108,7 +109,7 @@ class PricingCalculatorService {
         price: price.price,
       };
     } catch (error) {
-      console.error('Error getting service price:', error);
+      logger.error('Erreur getServicePrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la récupération du prix de service',
@@ -176,7 +177,7 @@ class PricingCalculatorService {
         },
       };
     } catch (error) {
-      console.error('Error calculating total price:', error);
+      logger.error('Erreur calculTotalPrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors du calcul du prix total',

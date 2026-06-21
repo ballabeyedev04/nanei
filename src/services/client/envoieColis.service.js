@@ -1,7 +1,9 @@
 const { Colis, Utilisateur, Notifications } = require('../../models');
+const Paiement = require('../../models/paiement.model');
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
+const logger = require('../../config/logger');
 const { sendSMS } = require('../twilio.service');
 
 class EnvoieColisService {
@@ -71,24 +73,32 @@ class EnvoieColisService {
         colisId: colis.id
       }, { transaction });
 
+      // Créer automatiquement l'enregistrement de paiement
+      await Paiement.create({
+        colisId:   colis.id,
+        payeurId:  utilisateurConnecte.id,
+        prixTotal: prix,
+        statut:    'en_attente',
+      }, { transaction });
+
       await transaction.commit();
 
       // ✅ Envoi du SMS de notification au destinataire via l'API Twilio (non-bloquant)
 
       if (recepteur.telephone) {
-  console.log("Début SMS");
+  logger.debug('Début envoi SMS notification');
           const messageText = `Bonjour ${recepteur.prenom} ${recepteur.nom}, vous allez recevoir le colis reference : ${colis.reference} chez Franco Mali Ship. Merci de votre confiance !`;
 
 
   sendSMS(recepteur.telephone, messageText)
     .then(res => {
-      console.log("Résultat SMS :", res);
+      logger.debug('SMS envoyé', { success: res?.success });
     })
     .catch(err => {
-      console.error("Erreur SMS :", err);
+      logger.warn('Erreur SMS notification', { error: err.message });
     });
 
-  console.log("Fin lancement SMS");
+  logger.debug('Fin lancement SMS');
 }
 
       return {
@@ -99,7 +109,7 @@ class EnvoieColisService {
 
     } catch (error) {
       await transaction.rollback();
-      console.error('❌ Erreur envoieColis:', error);
+      logger.error('Erreur envoieColis', { error: error.message, stack: error.stack });
 
       return {
         success: false,
@@ -136,7 +146,7 @@ class EnvoieColisService {
         data: clients
       };
     } catch (error) {
-      console.error('❌ Erreur recherche client:', error);
+      logger.error('Erreur rechercherClient', { error: error.message, stack: error.stack });
       return {
         success: false,
         message: error.message
@@ -169,7 +179,7 @@ class EnvoieColisService {
         data: colisEnvoyes
       };
     } catch (error) {
-      console.error('❌ Erreur getColisEnvoyes:', error);
+      logger.error('Erreur getColisEnvoyes', { error: error.message, stack: error.stack });
       return {
         success: false,
         message: error.message
@@ -202,7 +212,7 @@ class EnvoieColisService {
         data: colisRecus
       };
     } catch (error) {
-      console.error('❌ Erreur getColisRecus:', error);
+      logger.error('Erreur getColisRecus', { error: error.message, stack: error.stack });
       return {
         success: false,
         message: error.message
@@ -232,7 +242,7 @@ class EnvoieColisService {
       };
 
     } catch (error) {
-      console.error('❌ Erreur getStatistiquesColis:', error);
+      logger.error('Erreur getStatistiquesColis', { error: error.message, stack: error.stack });
 
       return {
         success: false,
@@ -267,7 +277,7 @@ class EnvoieColisService {
         data: notificationsRecus
       };
     } catch (error) {
-      console.error('❌ Erreur getNotifications:', error);
+      logger.error('Erreur getNotifications', { error: error.message, stack: error.stack });
       return {
         success: false,
         message: error.message
@@ -291,7 +301,7 @@ class EnvoieColisService {
       };
 
     } catch (error) {
-      console.error('❌ Erreur marquerNotificationCommeLue:', error);
+      logger.error('Erreur marquerNotificationCommeLue', { error: error.message, stack: error.stack });
       return {
         success: false,
         message: error.message

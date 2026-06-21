@@ -1,6 +1,7 @@
 require('dotenv').config();
 const sequelize = require('./config/db');
 const app = require('./app');
+const logger = require('./config/logger');
 
 // Modèles
 const User = require('./models/utilisateur.model');
@@ -17,13 +18,13 @@ const seedAdmin = require("./seed/seedAdmin");
 
     // creation admin
     await seedAdmin();
-    console.log('✅ Base synchronisée avec succès');
+    logger.info('Base synchronisée avec succès');
 
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Serveur lancé sur le port ${PORT}`);
+      logger.info(`Serveur lancé sur le port ${PORT}`);
     });
   } catch (err) {
-    console.error('❌ Erreur lors de la synchronisation de la base :', err);
+    logger.error('Erreur lors de la synchronisation de la base', { error: err.message, stack: err.stack });
   }
 })();

@@ -1,4 +1,5 @@
 const EnvoieColisService = require('../../services/client/envoieColis.service');
+const logger = require('../../config/logger');
 const Country = require('../../models/country.model');
 const ShippingPrice = require('../../models/shippingPrice.model');
 const ServicePrice = require('../../models/servicePrice.model');
@@ -27,13 +28,14 @@ exports.envoieColisController = async (req, res) => {
       });
     }
 
+    logger.info('Colis créé', { colis_id: result.data?.id, user_id: utilisateurConnecte?.id, destination });
     return res.status(201).json({
       message: result.message,
       colis: result.data
     });
 
   } catch (err) {
-    console.error('Erreur envoi colis :', err);
+    logger.error('Erreur dans envoieColisController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de l’envoi du colis',
       erreur: err.message
@@ -59,7 +61,7 @@ exports.rechercherClientController = async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Erreur recherche client :', err);
+    logger.error('Erreur dans rechercherClientController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de la recherche du client',
       erreur: err.message
@@ -81,7 +83,7 @@ exports.getColisEnvoyesController = async (req, res) => {
 
     return res.status(200).json({ data: result.data });
   } catch (err) {
-    console.error('Erreur récupération colis envoyés :', err);
+    logger.error('Erreur dans getColisEnvoyesController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de la récupération des colis envoyés',
       erreur: err.message
@@ -102,7 +104,7 @@ exports.getColisRecusController = async (req, res) => {
 
     return res.status(200).json({ data: result.data });
   } catch (err) {
-    console.error('Erreur récupération colis reçus :', err);
+    logger.error('Erreur dans getColisRecusController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de la récupération des colis reçus',
       erreur: err.message
@@ -135,7 +137,7 @@ exports.getNotificationsController = async (req, res) => {
 
     return res.status(200).json({ data: result.data });
   } catch (err) {
-    console.error('Erreur récupération notifications :', err);
+    logger.error('Erreur dans getNotificationsController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de la récupération des notifications',
       erreur: err.message
@@ -153,7 +155,7 @@ exports.getCountriesController = async (req, res) => {
     });
     return res.status(200).json({ success: true, data: countries });
   } catch (err) {
-    console.error('Erreur getCountries :', err);
+    logger.error('Erreur dans getCountriesController', { error: err.message, stack: err.stack });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
@@ -200,7 +202,7 @@ exports.getPricingByCountryController = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('Erreur getPricingByCountry :', err);
+    logger.error('Erreur dans getPricingByCountryController', { error: err.message, stack: err.stack });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
@@ -218,7 +220,7 @@ exports.marquerNotificationCommeLueController = async (req, res) => {
 
     return res.status(200).json({ message: 'Notification marquée comme lue', data: result.data });
   } catch (err) {
-    console.error('Erreur marquer notification comme lue :', err);
+    logger.error('Erreur dans marquerNotificationCommeLueController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de la mise à jour de la notification',
       erreur: err.message

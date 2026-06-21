@@ -50,6 +50,10 @@ const User = sequelize.define('User', {
   resetPasswordExpires: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  fcm_token: {
+    type: DataTypes.STRING,
+    allowNull: true
   }
 
 }, {

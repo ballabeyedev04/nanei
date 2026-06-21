@@ -1,4 +1,5 @@
 const PricingCalculatorService = require('../services/pricingCalculator.service');
+const logger = require('../config/logger');
 
 exports.calculatePrice = async (req, res) => {
   try {
@@ -29,7 +30,7 @@ exports.calculatePrice = async (req, res) => {
       data: result.data,
     });
   } catch (error) {
-    console.error('Error in calculatePrice:', error);
+    logger.error('Erreur calculatePrice', { error: error.message });
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur lors du calcul du prix',

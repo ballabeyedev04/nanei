@@ -17,6 +17,10 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(rateLimit(rateLimitConfig));
 
+// Request logger
+const requestLogger = require('./middlewares/requestLogger.middleware');
+app.use(requestLogger);
+
 
 // Routes
 const authRoutes = require('./routes/auth.route');
@@ -33,10 +37,37 @@ const shippingPriceRoutes = require('./routes/admin/shippingPrice.route');
 const shippingRateRoutes  = require('./routes/admin/shippingRate.route');
 const servicePriceRoutes = require('./routes/admin/servicePrice.route');
 const serviceRateRoutes  = require('./routes/admin/serviceRate.route');
+const paiementRoutes        = require('./routes/admin/paiement.route');
+const clientPaiementRoutes  = require('./routes/client/paiement.route');
+const factureRoutes         = require('./routes/client/facture.route');
 const pricingRoutes = require('./routes/pricing.route');
+const trackingRoutes = require('./routes/tracking.route');
+const etiquetteRoutes = require('./routes/client/etiquette.route');
+const reclamationClientRoutes = require('./routes/client/reclamation.route');
+const reclamationAdminRoutes = require('./routes/admin/reclamation.route');
+const contactRoutes = require('./routes/client/contact.route');
+const preuveAdminRoutes = require('./routes/admin/preuve.route');
+const preuveClientRoutes = require('./routes/client/preuve.route');
+const exportRoutes = require('./routes/admin/export.route');
+const avisClientRoutes = require('./routes/client/avis.route');
+const avisAdminRoutes = require('./routes/admin/avis.route');
+const rapportRoutes = require('./routes/admin/rapport.route');
+const auditLogRoutes = require('./routes/admin/auditlog.route');
+
 // Charge les modèles pour la sync Sequelize
 require('./models/shippingRate.model');
 require('./models/serviceRate.model');
+require('./models/paiement.model');
+require('./models/colisHistorique.model');
+require('./models/reclamation.model');
+require('./models/contactFavori.model');
+require('./models/preuvelivraison.model');
+require('./models/avis.model');
+require('./models/auditlog.model');
+
+// Jobs cron
+require('./jobs/alertes.job');
+require('./jobs/rapport.job');
 
 // Serveur fichiers statiques pour les uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -58,6 +89,26 @@ app.use('/nanei/admin/shipping-prices', shippingPriceRoutes);
 app.use('/nanei/admin/shipping-rates',  shippingRateRoutes);
 app.use('/nanei/admin/service-prices', servicePriceRoutes);
 app.use('/nanei/admin/service-rates',  serviceRateRoutes);
+app.use('/nanei/admin/paiements',      paiementRoutes);
+app.use('/nanei/paiements',            clientPaiementRoutes);
+app.use('/nanei/factures',             factureRoutes);
 app.use('/nanei/pricing', pricingRoutes);
+
+app.use('/nanei/suivi', trackingRoutes);
+app.use('/nanei/etiquettes', etiquetteRoutes);
+app.use('/nanei/reclamations', reclamationClientRoutes);
+app.use('/nanei/admin/reclamations', reclamationAdminRoutes);
+app.use('/nanei/contacts', contactRoutes);
+app.use('/nanei/admin', preuveAdminRoutes);
+app.use('/nanei', preuveClientRoutes);
+app.use('/nanei/admin/export', exportRoutes);
+app.use('/nanei/avis', avisClientRoutes);
+app.use('/nanei/admin/avis', avisAdminRoutes);
+app.use('/nanei/admin/rapports', rapportRoutes);
+app.use('/nanei/admin/audit-logs', auditLogRoutes);
+
+// Error handler (doit être après toutes les routes)
+const errorHandler = require('./middlewares/errorHandler.middleware');
+app.use(errorHandler);
 
 module.exports = app;

@@ -1,5 +1,6 @@
 const ServicePrice = require('../models/servicePrice.model');
 const Country = require('../models/country.model');
+const logger = require('../config/logger');
 
 class ServicePriceService {
   static async getServicePrices(filters = {}) {
@@ -29,7 +30,7 @@ class ServicePriceService {
         data: prices,
       };
     } catch (error) {
-      console.error('Error fetching service prices:', error);
+      logger.error('Erreur fetchServicePrices', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la récupération des prix de services',
@@ -62,7 +63,7 @@ class ServicePriceService {
         data: price,
       };
     } catch (error) {
-      console.error('Error fetching service price:', error);
+      logger.error('Erreur fetchServicePrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la récupération du prix',
@@ -134,7 +135,7 @@ class ServicePriceService {
         data: servicePriceWithCountry,
       };
     } catch (error) {
-      console.error('Error creating service price:', error);
+      logger.error('Erreur createServicePrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la création du prix',
@@ -195,7 +196,7 @@ class ServicePriceService {
         data: updatedPrice,
       };
     } catch (error) {
-      console.error('Error updating service price:', error);
+      logger.error('Erreur updateServicePrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la mise à jour du prix',
@@ -222,7 +223,7 @@ class ServicePriceService {
         message: 'Prix supprimé avec succès',
       };
     } catch (error) {
-      console.error('Error deleting service price:', error);
+      logger.error('Erreur deleteServicePrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la suppression du prix',

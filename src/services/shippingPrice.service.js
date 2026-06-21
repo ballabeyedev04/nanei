@@ -1,6 +1,7 @@
 const ShippingPrice = require('../models/shippingPrice.model');
 const Country = require('../models/country.model');
 const { Op } = require('sequelize');
+const logger = require('../config/logger');
 
 class ShippingPriceService {
   static async getShippingPrices(filters = {}) {
@@ -30,7 +31,7 @@ class ShippingPriceService {
         data: prices,
       };
     } catch (error) {
-      console.error('Error fetching shipping prices:', error);
+      logger.error('Erreur fetchShippingPrices', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la récupération des prix de transport',
@@ -63,7 +64,7 @@ class ShippingPriceService {
         data: price,
       };
     } catch (error) {
-      console.error('Error fetching shipping price:', error);
+      logger.error('Erreur fetchShippingPrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la récupération du prix',
@@ -147,7 +148,7 @@ class ShippingPriceService {
         data: priceWithCountry,
       };
     } catch (error) {
-      console.error('Error creating shipping price:', error);
+      logger.error('Erreur createShippingPrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la création du prix',
@@ -235,7 +236,7 @@ class ShippingPriceService {
         data: updatedPrice,
       };
     } catch (error) {
-      console.error('Error updating shipping price:', error);
+      logger.error('Erreur updateShippingPrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la mise à jour du prix',
@@ -292,7 +293,7 @@ class ShippingPriceService {
 
       return { success: true, message: 'Tarifs créés/mis à jour avec succès', data: results };
     } catch (error) {
-      console.error('Error in createOrUpdateBulk:', error);
+      logger.error('Erreur createOrUpdateBulk shippingPrice', { error: error.message });
       return { success: false, message: 'Erreur serveur', error: error.message };
     }
   }
@@ -315,7 +316,7 @@ class ShippingPriceService {
         message: 'Prix supprimé avec succès',
       };
     } catch (error) {
-      console.error('Error deleting shipping price:', error);
+      logger.error('Erreur deleteShippingPrice', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la suppression du prix',

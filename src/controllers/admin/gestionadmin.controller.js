@@ -1,4 +1,5 @@
 const GestionAdminService = require('../../services/admin/gestionadmin.service');
+const logger = require('../../config/logger');
 
 // ===================== LISTE ADMINS =====================
 exports.listeAdmins = async (req, res) => {

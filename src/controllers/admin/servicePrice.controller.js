@@ -1,4 +1,5 @@
 const ServicePriceService = require('../../services/servicePrice.service');
+const logger = require('../../config/logger');
 
 exports.getServicePrices = async (req, res) => {
   try {
@@ -19,7 +20,7 @@ exports.getServicePrices = async (req, res) => {
       data: result.data,
     });
   } catch (error) {
-    console.error('Error in getServicePrices:', error);
+    logger.error('Erreur getServicePrices', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -42,7 +43,7 @@ exports.getServicePriceById = async (req, res) => {
       data: result.data,
     });
   } catch (error) {
-    console.error('Error in getServicePriceById:', error);
+    logger.error('Erreur getServicePriceById', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -60,7 +61,7 @@ exports.createServicePrice = async (req, res) => {
 
     return res.status(201).json(result);
   } catch (error) {
-    console.error('Error in createServicePrice:', error);
+    logger.error('Erreur createServicePrice', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -80,7 +81,7 @@ exports.updateServicePrice = async (req, res) => {
 
     return res.status(200).json(result);
   } catch (error) {
-    console.error('Error in updateServicePrice:', error);
+    logger.error('Erreur updateServicePrice', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -100,7 +101,7 @@ exports.deleteServicePrice = async (req, res) => {
 
     return res.status(200).json(result);
   } catch (error) {
-    console.error('Error in deleteServicePrice:', error);
+    logger.error('Erreur deleteServicePrice', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,

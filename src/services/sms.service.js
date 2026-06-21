@@ -1,5 +1,6 @@
 const dotenv = require('dotenv');
 dotenv.config();
+const logger = require('../config/logger');
 
 // Cache pour stocker le token OAuth et éviter de le re-demander à chaque SMS (limite Orange de 50 requêtes/min)
 let cachedToken = null;
@@ -23,7 +24,7 @@ async function getOrangeAccessToken() {
     return cachedToken;
   }
 
-  console.log('🔄 Orange SMS API : Demande d\'un nouveau token d\'accès...');
+  logger.debug('Orange SMS API : Demande nouveau token');
 
   // Encodage Base64 des identifiants (client_id:client_secret)
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
@@ -54,7 +55,7 @@ async function getOrangeAccessToken() {
   const expiresInMs = parseInt(data.expires_in || '3600', 10) * 1000;
   tokenExpiresAt = Date.now() + expiresInMs;
 
-  console.log('✅ Orange SMS API : Nouveau token obtenu avec succès.');
+  logger.info('Orange SMS API : Nouveau token obtenu');
   return cachedToken;
 }
 
@@ -120,7 +121,8 @@ async function sendSMS(to, message) {
       }
     };
 
-    console.log(`✉️ Orange SMS API : Envoi du message à ${formattedTo}...`);
+    const telMasque = to ? to.slice(0, 4) + '****' + to.slice(-2) : '[inconnu]';
+    logger.debug('Orange SMS API : Envoi message', { tel: telMasque });
 
     const response = await fetch(url, {
       method: 'POST',
@@ -138,11 +140,11 @@ async function sendSMS(to, message) {
     }
 
     const responseData = await response.json();
-    console.log(`🎉 Orange SMS API : SMS envoyé avec succès à ${to} !`);
+    logger.info('SMS envoyé avec succès', { tel: to ? to.slice(0, 4) + '****' + to.slice(-2) : '[inconnu]' });
     return { success: true, data: responseData };
 
   } catch (error) {
-    console.error('⚠️ Orange SMS API [ERROR] :', error.message);
+    logger.error('Orange SMS API erreur', { error: error.message });
     return { success: false, error: error.message };
   }
 }

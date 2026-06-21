@@ -1,5 +1,8 @@
 const AccountService = require('../services/account.service');
+const logger = require('../config/logger');
 const formatUser = require('../utils/formatUser');
+const User = require('../models/utilisateur.model');
+const { v4: uuidv4 } = require('uuid');
 
 // ── GET /me ───────────────────────────────────────────────────────────────────
 exports.me = async (req, res) => {
@@ -10,7 +13,7 @@ exports.me = async (req, res) => {
     }
     return res.status(200).json({ utilisateur: formatUser(result.utilisateur) });
   } catch (err) {
-    console.error('Erreur me:', err);
+    logger.error('Erreur dans me', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 };
@@ -40,7 +43,7 @@ exports.updateProfile = async (req, res) => {
 
     return res.status(200).json({ message, utilisateur: formatUser(utilisateur) });
   } catch (err) {
-    console.error('Erreur modification profil :', err);
+    logger.error('Erreur dans updateProfile', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ message: 'Erreur serveur lors de la modification du profil' });
   }
 };
@@ -62,7 +65,7 @@ exports.forgotPassword = async (req, res) => {
 
     return res.status(200).json({ message: result.message });
   } catch (error) {
-    console.error('Erreur controller forgotPassword:', error);
+    logger.error('Erreur dans forgotPassword', { error: error.message, stack: error.stack });
     return res.status(500).json({ message: "Erreur serveur lors de la demande de réinitialisation" });
   }
 };
@@ -78,7 +81,7 @@ exports.resetPassword = async (req, res) => {
     }
     return res.status(200).json({ message: result.message });
   } catch (error) {
-    console.error('Erreur controller resetPassword:', error);
+    logger.error('Erreur dans resetPassword', { error: error.message, stack: error.stack });
     return res.status(500).json({ message: "Erreur serveur lors de la réinitialisation du mot de passe" });
   }
 };
@@ -101,7 +104,48 @@ exports.changePassword = async (req, res) => {
 
     return res.status(200).json({ message: result.message });
   } catch (error) {
-    console.error("Erreur controller changePassword:", error);
+    logger.error('Erreur dans changePassword', { error: error.message, stack: error.stack, user_id: req.user?.id });
     return res.status(500).json({ message: "Erreur serveur lors du changement de mot de passe" });
+  }
+};
+
+// ── POST /fcm-token ───────────────────────────────────────────────────────────
+exports.updateFcmToken = async (req, res) => {
+  const { fcm_token } = req.body;
+  if (!fcm_token) {
+    return res.status(400).json({ message: 'fcm_token est requis' });
+  }
+  try {
+    await User.update({ fcm_token }, { where: { id: req.user.id } });
+    return res.status(200).json({ message: 'FCM token enregistré' });
+  } catch (err) {
+    logger.error('Erreur dans updateFcmToken', { error: err.message, stack: err.stack, user_id: req.user?.id });
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+// ── DELETE /account (RGPD) ────────────────────────────────────────────────────
+exports.deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const anonymEmail = `deleted_${uuidv4()}@nanei.app`;
+
+    await User.update(
+      {
+        nom: 'Utilisateur supprimé',
+        prenom: '',
+        email: anonymEmail,
+        telephone: null,
+        mot_de_passe: 'DELETED',
+        statut: 'inactif',
+        fcm_token: null,
+      },
+      { where: { id: userId } }
+    );
+
+    return res.status(200).json({ message: 'Compte supprimé (anonymisé) avec succès' });
+  } catch (err) {
+    logger.error('Erreur dans deleteAccount', { error: err.message, stack: err.stack, user_id: req.user?.id });
+    return res.status(500).json({ message: 'Erreur serveur lors de la suppression du compte' });
   }
 };

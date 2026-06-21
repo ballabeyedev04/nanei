@@ -1,4 +1,5 @@
 const GestionUtilisateurService = require('../../services/admin/gestionutilisateur.service');
+const logger = require('../../config/logger');
 
 
 // 🔹 Lister utilisateurs particuliers
@@ -13,7 +14,7 @@ exports.listeUtilisateur = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur liste utilisateurs:', error);
+    logger.error('Erreur dans listeUtilisateur', { error: error.message, stack: error.stack, user_id: req.user?.id });
 
     return res.status(500).json({
       success: false,
@@ -37,7 +38,7 @@ exports.activerUtilisateur = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur activation utilisateur:', error);
+    logger.error('Erreur dans activerUtilisateur', { error: error.message, stack: error.stack, user_id: req.user?.id });
 
     return res.status(400).json({
       success: false,
@@ -61,7 +62,7 @@ exports.desactiverUtilisateur = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur désactivation utilisateur:', error);
+    logger.error('Erreur dans desactiverUtilisateur', { error: error.message, stack: error.stack, user_id: req.user?.id });
 
     return res.status(400).json({
       success: false,
@@ -82,7 +83,7 @@ exports.nombreUtilisateursParticuliers = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur comptage utilisateurs :', error);
+    logger.error('Erreur dans nombreUtilisateursParticuliers', { error: error.message, stack: error.stack, user_id: req.user?.id });
 
     return res.status(500).json({
       success: false,
@@ -112,7 +113,7 @@ exports.rechercherUtilisateur = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur recherche utilisateur:', error);
+    logger.error('Erreur dans rechercherUtilisateur', { error: error.message, stack: error.stack, user_id: req.user?.id });
 
     return res.status(500).json({
       success: false,

@@ -1,4 +1,5 @@
 const GestionColisService = require('../../services/admin/gestioncolis.service');
+const logger = require('../../config/logger');
 
 /* ===================== LISTE TOUS LES COLIS ===================== */
 exports.listeTousLesColis = async (req, res) => {
@@ -7,6 +8,7 @@ exports.listeTousLesColis = async (req, res) => {
 
     return res.status(200).json(result);
   } catch (error) {
+    logger.error('Erreur dans listeTousLesColis', { error: error.message, stack: error.stack, user_id: req.user?.id });
     return res.status(500).json({
       success: false,
       message: "Erreur serveur lors de la récupération des colis",
@@ -142,21 +144,14 @@ exports.rechercherColis = async (req, res) => {
 exports.changerEnAttente = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const result = await GestionColisService.changerEnAttente(id);
-
-    if (!result.success) {
-      return res.status(404).json(result);
-    }
-
+    const adminId = req.user?.id;
+    const result = await GestionColisService.changerEnAttente(id, adminId);
+    if (!result.success) return res.status(404).json(result);
+    logger.info('Statut colis modifié', { colis_id: id, nouveau_statut: 'en_attente', admin_id: adminId });
     return res.status(200).json(result);
-
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Erreur changement statut en attente",
-      error: error.message
-    });
+    logger.error('Erreur dans changerEnAttente', { error: error.message, stack: error.stack, user_id: req.user?.id });
+    return res.status(500).json({ success: false, message: "Erreur changement statut en attente", error: error.message });
   }
 };
 
@@ -165,21 +160,14 @@ exports.changerEnAttente = async (req, res) => {
 exports.changerEnLivre = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const result = await GestionColisService.changerEnLivre(id);
-
-    if (!result.success) {
-      return res.status(404).json(result);
-    }
-
+    const adminId = req.user?.id;
+    const result = await GestionColisService.changerEnLivre(id, adminId);
+    if (!result.success) return res.status(404).json(result);
+    logger.info('Statut colis modifié', { colis_id: id, nouveau_statut: 'livre', admin_id: adminId });
     return res.status(200).json(result);
-
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Erreur changement statut livré",
-      error: error.message
-    });
+    logger.error('Erreur dans changerEnLivre', { error: error.message, stack: error.stack, user_id: req.user?.id });
+    return res.status(500).json({ success: false, message: "Erreur changement statut livré", error: error.message });
   }
 };
 
@@ -188,20 +176,13 @@ exports.changerEnLivre = async (req, res) => {
 exports.changerEnRecupere = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const result = await GestionColisService.changerEnRecupere(id);
-
-    if (!result.success) {
-      return res.status(404).json(result);
-    }
-
+    const adminId = req.user?.id;
+    const result = await GestionColisService.changerEnRecupere(id, adminId);
+    if (!result.success) return res.status(404).json(result);
+    logger.info('Statut colis modifié', { colis_id: id, nouveau_statut: 'recupere', admin_id: adminId });
     return res.status(200).json(result);
-
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Erreur changement statut récupéré",
-      error: error.message
-    });
+    logger.error('Erreur dans changerEnRecupere', { error: error.message, stack: error.stack, user_id: req.user?.id });
+    return res.status(500).json({ success: false, message: "Erreur changement statut récupéré", error: error.message });
   }
 };

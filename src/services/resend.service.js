@@ -1,4 +1,5 @@
 const { Resend } = require('resend');
+const logger = require('../config/logger');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -12,15 +13,15 @@ async function sendEmail({ to, subject, html }) {
   const { data, error } = await resend.emails.send({ from: FROM, to, subject, html });
 
   if (error) {
-    console.error('Resend — erreur envoi email :', error);
+    logger.error('Resend erreur envoi email', { error: error.message });
     throw new Error(error.message);
   }
 
   if (isProd) {
     const domain = (Array.isArray(to) ? to[0] : to).split('@')[1] ?? '?';
-    console.log(`[resend] Email envoyé à *@${domain} — ${subject}`);
+    logger.info('Email envoyé', { destinataire: `*@${domain}`, sujet: subject });
   } else {
-    console.log(`[resend][dev] Email envoyé à ${to} — ${subject} (id: ${data?.id})`);
+    logger.debug('Email envoyé (dev)', { sujet: subject, id: data?.id });
   }
 
   return data;

@@ -3,6 +3,7 @@ const UserOtp     = require('../models/userOtp.model');
 const bcrypt      = require('bcryptjs');
 const crypto      = require('crypto');
 const sequelize   = require('../config/db');
+const logger      = require('../config/logger');
 const { bcryptConfig } = require('../config/security');
 const { sendOtpEmail } = require('./resend.service');
 
@@ -48,7 +49,7 @@ class AccountService {
 
       return { message: "Un code de réinitialisation a été envoyé à votre adresse email." };
     } catch (error) {
-      console.error('Erreur forgotPassword:', error);
+      logger.error('Erreur forgotPassword', { error: error.message, stack: error.stack });
       throw error;
     }
   }
@@ -82,7 +83,7 @@ class AccountService {
 
       return { message: 'Mot de passe réinitialisé avec succès.' };
     } catch (error) {
-      console.error('Erreur resetPassword:', error);
+      logger.error('Erreur resetPassword', { error: error.message, stack: error.stack });
       throw error;
     }
   }
@@ -105,7 +106,7 @@ class AccountService {
 
       return { message: "Mot de passe modifié avec succès." };
     } catch (error) {
-      console.error("Erreur changePassword:", error);
+      logger.error('Erreur changePassword', { error: error.message, stack: error.stack });
       throw error;
     }
   }

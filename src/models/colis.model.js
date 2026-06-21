@@ -56,12 +56,12 @@ const Colis = sequelize.define('Colis', {
 
   statut: {
     type: DataTypes.ENUM(
-      'en_attente',
-      'recupere',
+      'en_attente', 
+      'recupere', 
       'livre'
     ),
-    defaultValue: 'en_attente'
-  }
+    defaultValue: 'en_attente',
+  },
 
 }, {
   tableName: 'colis',

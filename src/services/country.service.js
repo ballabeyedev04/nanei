@@ -1,4 +1,5 @@
 const Country = require('../models/country.model');
+const logger = require('../config/logger');
 
 class CountryService {
   static async getCountries(filters = {}) {
@@ -18,7 +19,7 @@ class CountryService {
         data: countries,
       };
     } catch (error) {
-      console.error('Error fetching countries:', error);
+      logger.error('Erreur fetchCountries', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la récupération des pays',
@@ -43,7 +44,7 @@ class CountryService {
         data: country,
       };
     } catch (error) {
-      console.error('Error fetching country:', error);
+      logger.error('Erreur fetchCountry', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la récupération du pays',
@@ -86,7 +87,7 @@ class CountryService {
         data: country,
       };
     } catch (error) {
-      console.error('Error creating country:', error);
+      logger.error('Erreur createCountry', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la création du pays',
@@ -133,7 +134,7 @@ class CountryService {
         data: country,
       };
     } catch (error) {
-      console.error('Error updating country:', error);
+      logger.error('Erreur updateCountry', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la mise à jour du pays',
@@ -160,7 +161,7 @@ class CountryService {
         message: 'Pays supprimé avec succès',
       };
     } catch (error) {
-      console.error('Error deleting country:', error);
+      logger.error('Erreur deleteCountry', { error: error.message });
       return {
         success: false,
         message: 'Erreur lors de la suppression du pays',

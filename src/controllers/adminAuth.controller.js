@@ -1,4 +1,5 @@
 const AdminAuthService = require('../services/adminAuth.service');
+const logger = require('../config/logger');
 
 /**
  * POST /nanei/admin/forgot-password
@@ -21,7 +22,7 @@ exports.forgotPassword = async (req, res) => {
     // On retourne toujours 200 (même si l'email n'existe pas — anti-énumération)
     return res.status(200).json(result);
   } catch (error) {
-    console.error('[AdminAuth] Erreur forgotPassword :', error);
+    logger.error('Erreur dans adminAuth.forgotPassword', { error: error.message, stack: error.stack });
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur. Veuillez réessayer dans quelques instants.'
@@ -60,7 +61,7 @@ exports.resetPassword = async (req, res) => {
 
     return res.status(200).json(result);
   } catch (error) {
-    console.error('[AdminAuth] Erreur resetPassword :', error);
+    logger.error('Erreur dans adminAuth.resetPassword', { error: error.message, stack: error.stack });
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur. Veuillez réessayer dans quelques instants.'

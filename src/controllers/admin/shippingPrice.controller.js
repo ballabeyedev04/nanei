@@ -1,4 +1,5 @@
 const ShippingPriceService = require('../../services/shippingPrice.service');
+const logger = require('../../config/logger');
 
 exports.getShippingPrices = async (req, res) => {
   try {
@@ -19,7 +20,7 @@ exports.getShippingPrices = async (req, res) => {
       data: result.data,
     });
   } catch (error) {
-    console.error('Error in getShippingPrices:', error);
+    logger.error('Erreur getShippingPrices', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -42,7 +43,7 @@ exports.getShippingPriceById = async (req, res) => {
       data: result.data,
     });
   } catch (error) {
-    console.error('Error in getShippingPriceById:', error);
+    logger.error('Erreur getShippingPriceById', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -60,7 +61,7 @@ exports.createShippingPrice = async (req, res) => {
 
     return res.status(201).json(result);
   } catch (error) {
-    console.error('Error in createShippingPrice:', error);
+    logger.error('Erreur createShippingPrice', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -80,7 +81,7 @@ exports.updateShippingPrice = async (req, res) => {
 
     return res.status(200).json(result);
   } catch (error) {
-    console.error('Error in updateShippingPrice:', error);
+    logger.error('Erreur updateShippingPrice', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,
@@ -94,7 +95,7 @@ exports.createOrUpdateBulk = async (req, res) => {
     if (!result.success) return res.status(400).json(result);
     return res.status(200).json(result);
   } catch (error) {
-    console.error('Error in createOrUpdateBulk:', error);
+    logger.error('Erreur createOrUpdateBulk shippingPrice', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 };
@@ -111,7 +112,7 @@ exports.deleteShippingPrice = async (req, res) => {
 
     return res.status(200).json(result);
   } catch (error) {
-    console.error('Error in deleteShippingPrice:', error);
+    logger.error('Erreur deleteShippingPrice', { error: error.message, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur',
       error: error.message,

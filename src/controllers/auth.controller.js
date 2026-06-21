@@ -1,4 +1,5 @@
 const AuthService = require('../services/auth.service');
+const logger = require('../config/logger');
 const formatUser = require('../utils/formatUser');
 const jwt = require('jsonwebtoken');
 const { jwtConfig } = require('../config/security');
@@ -33,13 +34,14 @@ exports.inscriptionUser = async (req, res) => {
       });
     }
 
+    logger.info('Nouvel utilisateur inscrit', { user_id: result.utilisateur?.id });
     return res.status(201).json({
       message: result.message,
       utilisateur: formatUser(result.utilisateur)
     });
 
   } catch (err) {
-    console.error('Erreur lors de l’inscription :', err);
+    logger.error(‘Erreur dans inscriptionUser’, { error: err.message, stack: err.stack });
     return res.status(500).json({
       message: 'Erreur serveur lors de l’inscription',
       erreur: err.message
@@ -58,12 +60,13 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: result.error ?? result.message ?? 'Identifiants incorrects' });
     }
 
+    logger.info('Connexion utilisateur réussie', { user_id: result.utilisateur?.id });
     return res.status(200).json({
       token: result.token,
       utilisateur: formatUser(result.utilisateur)
     });
   } catch (err) {
-    console.error('Erreur connexion:', err);
+    logger.error('Erreur dans login', { error: err.message, stack: err.stack });
     return res.status(500).json({
       message: 'Erreur serveur',
       erreur: err.message
@@ -173,7 +176,7 @@ exports.refresh = async (req, res) => {
 
     return res.status(200).json({ token: newToken });
   } catch (err) {
-    console.error('Erreur refresh:', err);
+    logger.error('Erreur dans refresh', { error: err.message, stack: err.stack });
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 };
@@ -187,7 +190,7 @@ exports.logout = async (req, res) => {
     }
     return res.status(200).json({ message: 'Déconnexion réussie' });
   } catch (err) {
-    console.error('Erreur logout:', err);
+    logger.error('Erreur dans logout', { error: err.message, stack: err.stack });
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 };
