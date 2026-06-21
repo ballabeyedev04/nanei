@@ -51,6 +51,14 @@ const User = sequelize.define('User', {
     type: DataTypes.DATE,
     allowNull: true
   },
+  otpCode: {
+    type: DataTypes.STRING(6),
+    allowNull: true
+  },
+  otpExpires: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
   fcm_token: {
     type: DataTypes.STRING,
     allowNull: true

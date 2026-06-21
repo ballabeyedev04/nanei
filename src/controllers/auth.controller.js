@@ -223,27 +223,20 @@ exports.oublierPassword = async (req, res) => {
 
 exports.resetPassword = async (req, res) => {
   try {
-    const { token } = req.params;
-    const { password } = req.body;
+    const { email, code, mot_de_passe } = req.body;
 
-    const result = await AuthService.resetPassword(token, password);
-
-    if (!result.success) {
-      return res.status(400).json({
-        success: false,
-        message: result.message
-      });
+    if (!email || !code || !mot_de_passe) {
+      return res.status(400).json({ success: false, message: 'Email, code et nouveau mot de passe requis' });
     }
 
-    return res.status(200).json({
-      success: true,
-      message: result.message
-    });
+    const result = await AuthService.resetPassword(email, code, mot_de_passe);
 
+    if (!result.success) {
+      return res.status(400).json({ success: false, message: result.message });
+    }
+
+    return res.status(200).json({ success: true, message: result.message });
   } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

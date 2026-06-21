@@ -24,7 +24,7 @@ router.post('/logout', validate(logoutSchema), authController.logout);
 
 // Mot de passe oublié / réinitialisation
 router.post('/oublier-password', authRateLimit, validate(forgotPasswordSchema), authController.oublierPassword);
-router.post('/reset-password/:token', authRateLimit, validate(resetPasswordSchema), authController.resetPassword);
+router.post('/reset-password', authRateLimit, validate(resetPasswordSchema), authController.resetPassword);
 
 // Modifier profil / mot de passe (protégé)
 router.put('/modifier-password/:id', authMiddleware, authController.modifierPassword);

@@ -7,6 +7,7 @@ const { uploadImage } = require('../middlewares/uploadService'); // ton upload v
 const crypto = require("crypto");
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
+const { sendOtpEmail } = require('./resend.service');
 
 class AuthService {
 
@@ -307,90 +308,72 @@ class AuthService {
     }
   }
 
-  //oublie le password 
+  //oublie le password
   static async oublierPassword(email) {
     try {
-      const utilisateur = await Utilisateur.findOne({ where: { email } });
+      const utilisateur = await Utilisateur.findOne({ where: { email: email.trim().toLowerCase() } });
+
+      // Email inexistant → réponse générique (sécurité)
       if (!utilisateur) {
-        return {
-          success: false,
-          message: 'Utilisateur non trouvé'
-        };
+        return { success: false, message: 'Aucun compte trouvé avec cet email' };
       }
 
-      const token = crypto.randomBytes(32).toString("hex");
-      utilisateur.resetPasswordToken = token;
-      utilisateur.resetPasswordExpires = new Date(Date.now() + 3600000);
+      // Bloquer les admins
+      if (utilisateur.role === 'Admin') {
+        return { success: false, message: 'Action non autorisée' };
+      }
+
+      // Générer OTP 6 chiffres
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      utilisateur.otpCode = otpCode;
+      utilisateur.otpExpires = otpExpires;
       await utilisateur.save();
-      return {
-        success: true,
-        message: 'Token de réinitialisation de mot de passe envoyé'
-      };
+
+      // Envoyer par email via Resend
+      await sendOtpEmail({
+        to: utilisateur.email,
+        nom: `${utilisateur.prenom} ${utilisateur.nom}`,
+        otp: otpCode,
+      });
+
+      return { success: true, message: 'Code envoyé par email' };
     } catch (error) {
       throw error;
     }
   }
 
-  //reset le password 
-  static async resetPassword(token, password) {
+  //reset le password
+  static async resetPassword(email, otpCode, motDePasse) {
     try {
-      const utilisateur = await Utilisateur.findOne({ where: { resetPasswordToken: token, resetPasswordExpires: { [Op.gt]: Date.now() } } });
+      const utilisateur = await Utilisateur.findOne({
+        where: { email: email.trim().toLowerCase() }
+      });
+
       if (!utilisateur) {
-        return {
-          success: false,
-          message: 'Token de réinitialisation de mot de passe invalide ou expiré'
-        };
+        return { success: false, message: 'Compte introuvable' };
       }
 
-      //password doit contenir au moins 8 caractères
-      if (password.length < 8) {
-        return {
-          success: false,
-          message: 'Le mot de passe doit contenir au moins 8 caractères'
-        };
+      if (!utilisateur.otpCode || utilisateur.otpCode !== otpCode) {
+        return { success: false, message: 'Code incorrect' };
       }
 
-      //password doit contenir au moins une lettre majuscule
-      if (!/[A-Z]/.test(password)) {
-        return {
-          success: false,
-          message: 'Le mot de passe doit contenir au moins une lettre majuscule'
-        };
+      if (!utilisateur.otpExpires || utilisateur.otpExpires < new Date()) {
+        return { success: false, message: 'Code expiré. Demandez un nouveau code.' };
       }
 
-      //password doit contenir au moins une lettre minuscule
-      if (!/[a-z]/.test(password)) {
-        return {
-          success: false,
-          message: 'Le mot de passe doit contenir au moins une lettre minuscule'
-        };
+      if (!motDePasse || motDePasse.length < 6) {
+        return { success: false, message: 'Le mot de passe doit contenir au moins 6 caractères' };
       }
 
-      //password doit contenir au moins un chiffre
-      if (!/[0-9]/.test(password)) {
-        return {
-          success: false,
-          message: 'Le mot de passe doit contenir au moins un chiffre'
-        };
-      }
-
-      //password doit contenir au moins un caractère spécial
-      if (!/[!@#$%^&*]/.test(password)) {
-        return {
-          success: false,
-          message: 'Le mot de passe doit contenir au moins un caractère spécial'
-        };
-      }
-
-      const hashedPassword = await bcrypt.hash(password, bcryptConfig.saltRounds);
-      utilisateur.mot_de_passe = hashedPassword;
-      utilisateur.resetPasswordToken = null;
-      utilisateur.resetPasswordExpires = null;
+      const salt = await bcrypt.genSalt(10);
+      utilisateur.mot_de_passe = await bcrypt.hash(motDePasse, salt);
+      utilisateur.otpCode = null;
+      utilisateur.otpExpires = null;
       await utilisateur.save();
-      return {
-        success: true,
-        message: 'Mot de passe réinitialisé avec succès'
-      };
+
+      return { success: true, message: 'Mot de passe réinitialisé avec succès' };
     } catch (error) {
       throw error;
     }

@@ -29,7 +29,9 @@ const forgotPasswordSchema = Joi.object({
 });
 
 const resetPasswordSchema = Joi.object({
-  mot_de_passe: motDePasse.required()
+  email: email.required(),
+  code: Joi.string().length(6).pattern(/^\d{6}$/).required(),
+  mot_de_passe: Joi.string().min(6).required()
 });
 
 module.exports = {
