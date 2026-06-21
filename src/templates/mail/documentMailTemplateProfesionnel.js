@@ -1,4 +1,4 @@
-module.exports = ({ nomProfesionnel, numero_facture, type }) => `
+﻿module.exports = ({ nomProfesionnel, numero_facture, type }) => `
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -33,11 +33,11 @@ module.exports = ({ nomProfesionnel, numero_facture, type }) => `
 
               <p>
                 Le fichier PDF est joint à cet email.  
-                Vous pouvez le consulter, le partager ou l’archiver.
+                Vous pouvez le consulter, le partager ou l'archiver.
               </p>
 
               <p>
-                Une copie a également été envoyée au client afin qu’il puisse consulter
+                Une copie a également été envoyée au client afin qu'il puisse consulter
                 et signer le document si nécessaire.
               </p>
 
@@ -47,7 +47,7 @@ module.exports = ({ nomProfesionnel, numero_facture, type }) => `
 
               <p>
                 Cordialement,<br />
-                <strong>L’équipe SIGN</strong>
+                <strong>L'équipe SIGN</strong>
               </p>
             </td>
           </tr>

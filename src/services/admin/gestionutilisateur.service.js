@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+﻿const { Op } = require('sequelize');
 const Utilisateur = require('../../models/utilisateur.model');
 
 class GestionUtilisateurService {
@@ -70,7 +70,7 @@ class GestionUtilisateurService {
     }
   }
 
-  // 🔹 Nombre d’utilisateurs particuliers
+  // 🔹 Nombre d'utilisateurs particuliers
   static async nombreUtilisateursParticuliers() {
     try {
       const total = await Utilisateur.count({

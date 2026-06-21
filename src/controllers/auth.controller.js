@@ -1,4 +1,4 @@
-const AuthService = require('../services/auth.service');
+﻿const AuthService = require('../services/auth.service');
 const logger = require('../config/logger');
 const formatUser = require('../utils/formatUser');
 const jwt = require('jsonwebtoken');
@@ -41,9 +41,9 @@ exports.inscriptionUser = async (req, res) => {
     });
 
   } catch (err) {
-    logger.error(‘Erreur dans inscriptionUser’, { error: err.message, stack: err.stack });
+    logger.error('Erreur dans inscriptionUser', { error: err.message, stack: err.stack });
     return res.status(500).json({
-      message: 'Erreur serveur lors de l’inscription',
+      message: "Erreur serveur lors de l'inscription",
       erreur: err.message
     });
   }

@@ -73,12 +73,15 @@ const logger = createLogger({
       }),
     ] : []),
   ],
-  exceptionHandlers: isProd ? [
-    new transports.File({ filename: path.join(logsDir, 'exceptions.log') }),
-  ] : [],
-  rejectionHandlers: isProd ? [
-    new transports.File({ filename: path.join(logsDir, 'rejections.log') }),
-  ] : [],
+  exitOnError: false,
+  exceptionHandlers: [
+    new transports.Console({ format: isProd ? logFormat : devFormat }),
+    ...(isProd ? [new transports.File({ filename: path.join(logsDir, 'exceptions.log') })] : []),
+  ],
+  rejectionHandlers: [
+    new transports.Console({ format: isProd ? logFormat : devFormat }),
+    ...(isProd ? [new transports.File({ filename: path.join(logsDir, 'rejections.log') })] : []),
+  ],
 });
 
 module.exports = logger;

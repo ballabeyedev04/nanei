@@ -1,4 +1,4 @@
-const EnvoieColisService = require('../../services/client/envoieColis.service');
+﻿const EnvoieColisService = require('../../services/client/envoieColis.service');
 const logger = require('../../config/logger');
 const Country = require('../../models/country.model');
 const ShippingPrice = require('../../models/shippingPrice.model');
@@ -37,7 +37,7 @@ exports.envoieColisController = async (req, res) => {
   } catch (err) {
     logger.error('Erreur dans envoieColisController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
-      message: 'Erreur serveur lors de l’envoi du colis',
+      message: "Erreur serveur lors de l'envoi du colis",
       erreur: err.message
     });
   }

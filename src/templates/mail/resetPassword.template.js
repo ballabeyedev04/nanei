@@ -1,4 +1,4 @@
-module.exports = ({ nom, resetLink }) => {
+﻿module.exports = ({ nom, resetLink }) => {
   const logoUrl = 'http://localhost:3000/uploads/logo-sign.png';
 
   return `
@@ -40,14 +40,14 @@ module.exports = ({ nom, resetLink }) => {
 
       <div class="info">
         👉 Cliquez sur le bouton ci-dessous pour définir un nouveau mot de passe.<br/>
-        ⏱️ Ce lien est valable <strong>1 heure</strong> et ne peut être utilisé qu’une seule fois.
+        ⏱️ Ce lien est valable <strong>1 heure</strong> et ne peut être utilisé qu'une seule fois.
       </div>
 
       <div style="text-align:center;">
         <a class="btn" href="${resetLink}">Réinitialiser mon mot de passe</a>
       </div>
 
-      <p>Si vous n’êtes pas à l’origine de cette demande, aucune action n’est requise. Votre mot de passe actuel restera inchangé.</p>
+      <p>Si vous n'êtes pas à l'origine de cette demande, aucune action n'est requise. Votre mot de passe actuel restera inchangé.</p>
 
       <div class="footer">
         © ${new Date().getFullYear()} – Sign<br/>

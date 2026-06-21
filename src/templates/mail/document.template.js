@@ -1,4 +1,4 @@
-module.exports = ({ nomClient, numero_facture, type }) => {
+﻿module.exports = ({ nomClient, numero_facture, type }) => {
   return `
     <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
       <p>Bonjour <strong>${nomClient}</strong>,</p>
@@ -14,13 +14,13 @@ module.exports = ({ nomClient, numero_facture, type }) => {
       </p>
 
       <p>
-        Pour toute information complémentaire, n’hésitez pas à nous contacter.
+        Pour toute information complémentaire, n'hésitez pas à nous contacter.
       </p>
 
       <br>
 
       <p>Cordialement,</p>
-      <p><strong>L’équipe</strong></p>
+      <p><strong>L'équipe</strong></p>
     </div>
   `;
 };

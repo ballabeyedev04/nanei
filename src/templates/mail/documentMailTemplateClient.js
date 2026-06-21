@@ -1,4 +1,4 @@
-module.exports = ({ nomClient, numero_facture, type }) => `
+﻿module.exports = ({ nomClient, numero_facture, type }) => `
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -47,7 +47,7 @@ module.exports = ({ nomClient, numero_facture, type }) => `
 
               <p>
                 Cordialement,<br />
-                <strong>L’équipe SIGN</strong>
+                <strong>L'équipe SIGN</strong>
               </p>
             </td>
           </tr>
