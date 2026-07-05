@@ -1,6 +1,6 @@
 const Utilisateur = require('../models/utilisateur.model');
 const UserOtp     = require('../models/userOtp.model');
-const bcrypt      = require('bcryptjs');
+const bcrypt      = require('bcrypt');
 const crypto      = require('crypto');
 const sequelize   = require('../config/db');
 const logger      = require('../config/logger');

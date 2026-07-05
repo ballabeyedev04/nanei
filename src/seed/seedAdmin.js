@@ -1,5 +1,5 @@
 //creation admin automatiquement 
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
 const { Utilisateur } = require("../models"); // adapte le chemin
 
 const seedAdmin = async () => {

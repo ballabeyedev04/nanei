@@ -1,5 +1,5 @@
 const Utilisateur = require('../models/utilisateur.model');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { jwtConfig, bcryptConfig } = require('../config/security');
 const sequelize = require('../config/db');
