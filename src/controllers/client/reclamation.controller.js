@@ -2,9 +2,9 @@ const { Reclamation, Colis } = require('../../models');
 const logger = require('../../config/logger');
 const { sendEmail } = require('../../services/resend.service');
 const { sendSMS } = require('../../services/sms.service');
-const { createUploader, uploadBufferToCloudinary } = require('../../middlewares/cloudinaryUpload.middleware');
+const { createUploader, uploadBufferToR2 } = require('../../middlewares/r2Upload.middleware');
 
-// ── Multer config (mémoire — les fichiers partent directement vers Cloudinary) ─
+// ── Multer config (mémoire — les fichiers partent directement vers Cloudflare R2) ─
 const upload = createUploader({
   maxFileSize: 10 * 1024 * 1024, // 10 MB
   allowedMimeTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
@@ -29,9 +29,9 @@ exports.creer = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Ce colis ne vous appartient pas' });
     }
 
-    // Upload direct vers Cloudinary (buffers en mémoire, jamais écrits sur disque)
+    // Upload direct vers Cloudflare R2 (buffers en mémoire, jamais écrits sur disque)
     const photos = req.files
-      ? await Promise.all(req.files.map((f) => uploadBufferToCloudinary(f.buffer, 'nanei/reclamations')))
+      ? await Promise.all(req.files.map((f) => uploadBufferToR2(f.buffer, f.originalname, 'nanei/reclamations')))
       : [];
 
     const reclamation = await Reclamation.create({

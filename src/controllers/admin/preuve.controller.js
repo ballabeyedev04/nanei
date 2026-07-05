@@ -1,8 +1,8 @@
 const { PreuveLivraison, Colis } = require('../../models');
 const logger = require('../../config/logger');
-const { createUploader, uploadBufferToCloudinary } = require('../../middlewares/cloudinaryUpload.middleware');
+const { createUploader, uploadBufferToR2 } = require('../../middlewares/r2Upload.middleware');
 
-// ── Multer config (mémoire — le fichier part directement vers Cloudinary) ────
+// ── Multer config (mémoire — le fichier part directement vers Cloudflare R2) ─
 const upload = createUploader({
   maxFileSize: 15 * 1024 * 1024, // 15 MB
   allowedMimeTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
@@ -23,7 +23,7 @@ exports.ajouterPreuve = async (req, res) => {
     }
 
     const { commentaire, gps_lat, gps_lng } = req.body;
-    const photo_url = await uploadBufferToCloudinary(req.file.buffer, 'nanei/preuves');
+    const photo_url = await uploadBufferToR2(req.file.buffer, req.file.originalname, 'nanei/preuves');
 
     // Upsert (unique sur colis_id)
     const [preuve, created] = await PreuveLivraison.upsert({
