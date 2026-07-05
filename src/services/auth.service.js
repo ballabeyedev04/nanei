@@ -3,7 +3,6 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { jwtConfig, bcryptConfig } = require('../config/security');
 const sequelize = require('../config/db');
-const { uploadImage } = require('../middlewares/uploadService'); // ton upload vers Cloudinary
 const crypto = require("crypto");
 const { Op } = require('sequelize');
 const logger = require('../config/logger');

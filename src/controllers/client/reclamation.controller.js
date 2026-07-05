@@ -1,28 +1,13 @@
-const path = require('path');
-const multer = require('multer');
 const { Reclamation, Colis } = require('../../models');
 const logger = require('../../config/logger');
 const { sendEmail } = require('../../services/resend.service');
 const { sendSMS } = require('../../services/sms.service');
+const { createUploader, uploadBufferToCloudinary } = require('../../middlewares/cloudinaryUpload.middleware');
 
-// ── Multer config ────────────────────────────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '../../uploads/reclamations'));
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `reclamation-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Seules les images sont acceptées'));
-  },
+// ── Multer config (mémoire — les fichiers partent directement vers Cloudinary) ─
+const upload = createUploader({
+  maxFileSize: 10 * 1024 * 1024, // 10 MB
+  allowedMimeTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
 });
 
 exports.upload = upload;
@@ -44,8 +29,10 @@ exports.creer = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Ce colis ne vous appartient pas' });
     }
 
-    // Récupérer les chemins des photos uploadées
-    const photos = req.files ? req.files.map((f) => `/uploads/reclamations/${f.filename}`) : [];
+    // Upload direct vers Cloudinary (buffers en mémoire, jamais écrits sur disque)
+    const photos = req.files
+      ? await Promise.all(req.files.map((f) => uploadBufferToCloudinary(f.buffer, 'nanei/reclamations')))
+      : [];
 
     const reclamation = await Reclamation.create({
       colis_id,

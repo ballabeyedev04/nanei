@@ -1,26 +1,11 @@
-const path = require('path');
-const multer = require('multer');
 const { PreuveLivraison, Colis } = require('../../models');
 const logger = require('../../config/logger');
+const { createUploader, uploadBufferToCloudinary } = require('../../middlewares/cloudinaryUpload.middleware');
 
-// ── Multer config ────────────────────────────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '../../uploads/preuves'));
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `preuve-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Seules les images sont acceptées'));
-  },
+// ── Multer config (mémoire — le fichier part directement vers Cloudinary) ────
+const upload = createUploader({
+  maxFileSize: 15 * 1024 * 1024, // 15 MB
+  allowedMimeTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'],
 });
 
 exports.upload = upload;
@@ -38,7 +23,7 @@ exports.ajouterPreuve = async (req, res) => {
     }
 
     const { commentaire, gps_lat, gps_lng } = req.body;
-    const photo_url = `/uploads/preuves/${req.file.filename}`;
+    const photo_url = await uploadBufferToCloudinary(req.file.buffer, 'nanei/preuves');
 
     // Upsert (unique sur colis_id)
     const [preuve, created] = await PreuveLivraison.upsert({

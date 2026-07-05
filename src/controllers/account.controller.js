@@ -3,6 +3,7 @@ const logger = require('../config/logger');
 const formatUser = require('../utils/formatUser');
 const User = require('../models/utilisateur.model');
 const { v4: uuidv4 } = require('uuid');
+const { uploadBufferToCloudinary } = require('../middlewares/cloudinaryUpload.middleware');
 
 // ── GET /me ───────────────────────────────────────────────────────────────────
 exports.me = async (req, res) => {
@@ -31,9 +32,12 @@ exports.updateProfile = async (req, res) => {
     carte_identite_national_num
   } = req.body;
 
-  const photoProfil = req.file ? '/image_profils/' + req.file.filename : null;
-
   try {
+    // SÉCURITÉ/PERF: Upload direct vers Cloudinary (buffer en mémoire, jamais écrit sur disque)
+    const photoProfil = req.file
+      ? await uploadBufferToCloudinary(req.file.buffer, 'nanei/profils')
+      : null;
+
     const { utilisateur, message, error } = await AccountService.updateProfile({
       userId,
       data: { nom, prenom, email, telephone, adresse, photoProfil, carte_identite_national_num }
