@@ -1,80 +1,69 @@
+# ============================================================
+#  Nanei API — Docker Compose DÉVELOPPEMENT
+#  Usage : docker compose up --build
+#  Pour la production : docker compose -f docker-compose.prod.yml up -d
+# ============================================================
+
 services:
 
-  # ─────────────────────────────────────────
-  # Base de données PostgreSQL
-  # ─────────────────────────────────────────
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: nanei_postgres
+    container_name: nanei_postgres_dev
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-francomali}
-      POSTGRES_USER: ${DB_USER:-francouser}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-francopassword}
+      POSTGRES_DB:       ${DB_NAME:-nanei}
+      POSTGRES_USER:     ${DB_USER:-naneiuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-naneipassword}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_dev:/var/lib/postgresql/data
+    # En dev uniquement : exposer le port pour se connecter via pgAdmin / DBeaver
     ports:
       - "5432:5432"
+    networks:
+      - nanei_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-francouser} -d ${DB_NAME:-francomali}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-naneiuser} -d ${DB_NAME:-nanei}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
-  # ─────────────────────────────────────────
-  # Backend Node.js
-  # ─────────────────────────────────────────
+  # ── Backend Node.js ────────────────────────────────────────────────────────
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nanei_backend
+    container_name: nanei_backend_dev
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
-      NODE_ENV: development
-      PORT: 3000
-
-      # Base de données — pointe vers le service postgres ci-dessus
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-francomali}
-      DB_USER: ${DB_USER:-francouser}
-      DB_PASSWORD: ${DB_PASSWORD:-francopassword}
-
-      # JWT — les 3 secrets DOIVENT être différents
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      JWT_RESET_SECRET: ${JWT_RESET_SECRET}
-
-      # CORS
-      CORS_ORIGIN: ${CORS_ORIGIN:-*}
-      FRONTEND_URL: ${FRONTEND_URL}
-
-      # Email
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS}
-
-      # SMS Orange
-      ORANGE_SMS_CLIENT_ID: ${ORANGE_SMS_CLIENT_ID}
-      ORANGE_SMS_CLIENT_SECRET: ${ORANGE_SMS_CLIENT_SECRET}
-      ORANGE_SMS_SENDER_NUMBER: ${ORANGE_SMS_SENDER_NUMBER}
-      ORANGE_SMS_SENDER_NAME: ${ORANGE_SMS_SENDER_NAME}
-
-      # Twilio
-      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
-      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
-      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
-
+      NODE_ENV:  development
+      PORT:      3000
+      DB_HOST:   postgres
+      DB_PORT:   5432
+      DB_NAME:   ${DB_NAME:-nanei}
+      DB_USER:   ${DB_USER:-naneiuser}
+      DB_PASSWORD: ${DB_PASSWORD:-naneipassword}
+      DB_SSL_CA: ""
+      LOG_DIR:   /app/logs
     volumes:
       - ./uploads:/app/uploads
+      - ./logs:/app/logs
+      # En dev : montage du code source pour hot-reload (commenté en prod)
+      # - ./src:/app/src
+    networks:
+      - nanei_network
+
+networks:
+  nanei_network:
+    driver: bridge
 
 volumes:
-  postgres_data:
+  postgres_data_dev:

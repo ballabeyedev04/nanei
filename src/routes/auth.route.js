@@ -26,8 +26,8 @@ router.post('/logout', validate(logoutSchema), authController.logout);
 router.post('/oublier-password', authRateLimit, validate(forgotPasswordSchema), authController.oublierPassword);
 router.post('/reset-password', authRateLimit, validate(resetPasswordSchema), authController.resetPassword);
 
-// Modifier profil / mot de passe (protégé)
-router.put('/modifier-password/:id', authMiddleware, authController.modifierPassword);
-router.put('/modifier-profil/:id',   authMiddleware, authController.modifierProfil);
+// Modifier profil / mot de passe (protégé) — SÉCURITÉ: ID vient du JWT, pas de l'URL (IDOR fix)
+router.put('/modifier-password', authMiddleware, authController.modifierPassword);
+router.put('/modifier-profil',   authMiddleware, authController.modifierProfil);
 
 module.exports = router;

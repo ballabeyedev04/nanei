@@ -18,6 +18,15 @@ const UserOtp = sequelize.define('UserOtp', {
   expiresAt: {
     type: DataTypes.DATE,
     allowNull: false
+  },
+  failedAttempts: { // SÉCURITÉ: Compteur pour brute-force protection
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    allowNull: false
+  },
+  lockedUntil: { // SÉCURITÉ: Blocage après 3 tentatives échouées pendant 15 min
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   tableName: 'user_otps',

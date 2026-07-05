@@ -311,11 +311,12 @@ class AuthService {
   //oublie le password
   static async oublierPassword(email) {
     try {
+      const UserOtp = require('../models/userOtp.model');
       const utilisateur = await Utilisateur.findOne({ where: { email: email.trim().toLowerCase() } });
 
       // Email inexistant → réponse générique (sécurité)
       if (!utilisateur) {
-        return { success: false, message: 'Aucun compte trouvé avec cet email' };
+        return { success: true, message: 'Si un compte existe avec cet email, un code de réinitialisation a été envoyé.' };
       }
 
       // Bloquer les admins
@@ -325,11 +326,18 @@ class AuthService {
 
       // Générer OTP 6 chiffres
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpHash = await bcrypt.hash(otpCode, bcryptConfig.saltRounds); // SÉCURITÉ: Hasher le code
       const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-      utilisateur.otpCode = otpCode;
-      utilisateur.otpExpires = otpExpires;
-      await utilisateur.save();
+      // Supprimer l'ancien OTP s'il existe, créer le nouveau dans la table UserOtp
+      await UserOtp.destroy({ where: { utilisateurId: utilisateur.id } });
+      await UserOtp.create({
+        utilisateurId: utilisateur.id,
+        otpHash,
+        expiresAt: otpExpires,
+        failedAttempts: 0,
+        lockedUntil: null
+      });
 
       // Envoyer par email via Resend
       await sendOtpEmail({
@@ -338,8 +346,9 @@ class AuthService {
         otp: otpCode,
       });
 
-      return { success: true, message: 'Code envoyé par email' };
+      return { success: true, message: 'Si un compte existe avec cet email, un code de réinitialisation a été envoyé.' };
     } catch (error) {
+      logger.error('Erreur oublierPassword', { error: error.message, stack: error.stack });
       throw error;
     }
   }
@@ -347,6 +356,7 @@ class AuthService {
   //reset le password
   static async resetPassword(email, otpCode, motDePasse) {
     try {
+      const UserOtp = require('../models/userOtp.model');
       const utilisateur = await Utilisateur.findOne({
         where: { email: email.trim().toLowerCase() }
       });
@@ -355,26 +365,49 @@ class AuthService {
         return { success: false, message: 'Compte introuvable' };
       }
 
-      if (!utilisateur.otpCode || utilisateur.otpCode !== otpCode) {
-        return { success: false, message: 'Code incorrect' };
+      const otpRecord = await UserOtp.findOne({ where: { utilisateurId: utilisateur.id } });
+      if (!otpRecord) {
+        return { success: false, message: 'Aucun code de réinitialisation trouvé. Veuillez refaire la demande.' };
       }
 
-      if (!utilisateur.otpExpires || utilisateur.otpExpires < new Date()) {
-        return { success: false, message: 'Code expiré. Demandez un nouveau code.' };
+      // SÉCURITÉ: Vérifier le blocage (brute-force protection)
+      if (otpRecord.lockedUntil && new Date() < otpRecord.lockedUntil) {
+        const minutesRestantes = Math.ceil((otpRecord.lockedUntil - new Date()) / 60000);
+        return { success: false, message: `Trop de tentatives. Réessayez dans ${minutesRestantes} minute(s).` };
+      }
+
+      if (new Date() > otpRecord.expiresAt) {
+        await otpRecord.destroy();
+        return { success: false, message: 'Code expiré. Veuillez refaire la demande.' };
       }
 
       if (!motDePasse || motDePasse.length < 6) {
         return { success: false, message: 'Le mot de passe doit contenir au moins 6 caractères' };
       }
 
-      const salt = await bcrypt.genSalt(10);
-      utilisateur.mot_de_passe = await bcrypt.hash(motDePasse, salt);
-      utilisateur.otpCode = null;
+      // SÉCURITÉ: Vérifier avec bcrypt.compare, pas comparaison en clair
+      const isValid = await bcrypt.compare(otpCode, otpRecord.otpHash);
+      if (!isValid) {
+        // SÉCURITÉ: Incrémenter les tentatives échouées et bloquer après 3
+        await otpRecord.increment('failedAttempts');
+        if (otpRecord.failedAttempts + 1 >= 3) {
+          const lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // Blocage 15 min
+          await otpRecord.update({ lockedUntil });
+          logger.warn(`OTP brute-force : compte bloqué`, { user_id: utilisateur.id, attempts: otpRecord.failedAttempts + 1 });
+          return { success: false, message: `Trop de tentatives. Réessayez dans 15 minutes.` };
+        }
+        return { success: false, message: `Code incorrect (${3 - otpRecord.failedAttempts - 1} tentatives restantes).` };
+      }
+
+      utilisateur.mot_de_passe = await bcrypt.hash(motDePasse, bcryptConfig.saltRounds);
+      utilisateur.otpCode = null; // Nettoyer les anciens champs s'ils existent
       utilisateur.otpExpires = null;
       await utilisateur.save();
+      await otpRecord.destroy();
 
       return { success: true, message: 'Mot de passe réinitialisé avec succès' };
     } catch (error) {
+      logger.error('Erreur resetPassword', { error: error.message, stack: error.stack });
       throw error;
     }
   }

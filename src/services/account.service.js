@@ -67,6 +67,12 @@ class AccountService {
         return { error: 'Aucun code de réinitialisation trouvé. Veuillez refaire la demande.' };
       }
 
+      // SÉCURITÉ: Vérifier le blocage (brute-force protection)
+      if (otpRecord.lockedUntil && new Date() < otpRecord.lockedUntil) {
+        const minutesRestantes = Math.ceil((otpRecord.lockedUntil - new Date()) / 60000);
+        return { error: `Trop de tentatives. Réessayez dans ${minutesRestantes} minute(s).` };
+      }
+
       if (new Date() > otpRecord.expiresAt) {
         await otpRecord.destroy();
         return { error: 'Le code a expiré. Veuillez refaire la demande.' };
@@ -74,7 +80,15 @@ class AccountService {
 
       const isValid = await bcrypt.compare(otpRecu.toUpperCase().trim(), otpRecord.otpHash);
       if (!isValid) {
-        return { error: 'Code incorrect. Vérifiez le code reçu par email.' };
+        // SÉCURITÉ: Incrémenter les tentatives échouées et bloquer après 3
+        await otpRecord.increment('failedAttempts');
+        if (otpRecord.failedAttempts + 1 >= 3) {
+          const lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // Blocage 15 min
+          await otpRecord.update({ lockedUntil });
+          logger.warn(`OTP brute-force : compte bloqué`, { user_id: utilisateur.id, attempts: otpRecord.failedAttempts + 1 });
+          return { error: `Trop de tentatives. Réessayez dans 15 minutes.` };
+        }
+        return { error: `Code incorrect (${3 - otpRecord.failedAttempts - 1} tentatives restantes).` };
       }
 
       utilisateur.mot_de_passe = await bcrypt.hash(newPassword, bcryptConfig.saltRounds);

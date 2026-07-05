@@ -74,10 +74,10 @@ exports.login = async (req, res) => {
   }
 };
 
-//modifier password 
+//modifier password
 exports.modifierPassword = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.user.id; // SÉCURITÉ: Utiliser l'ID du JWT, pas celui de l'URL (IDOR fix)
     const { ancienPassword, nouveauPassword } = req.body;
 
     const result = await AuthService.modifierPassword(
@@ -109,7 +109,7 @@ exports.modifierPassword = async (req, res) => {
 
 exports.modifierProfil = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.user.id; // SÉCURITÉ: Utiliser l'ID du JWT, pas celui de l'URL (IDOR fix)
     const { nom, prenom, email, telephone, adresse } = req.body;
 
     const result = await AuthService.modifierProfil(

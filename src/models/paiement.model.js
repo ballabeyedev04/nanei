@@ -20,11 +20,11 @@ const Paiement = sequelize.define('Paiement', {
     references: { model: 'utilisateur', key: 'id' },
   },
   prixTotal: {
-    type: DataTypes.FLOAT,
+    type: DataTypes.DECIMAL(10, 2), // SÉCURITÉ: DECIMAL pour argent (pas FLOAT qui arrondit mal)
     allowNull: false,
   },
   montantPaye: {
-    type: DataTypes.FLOAT,
+    type: DataTypes.DECIMAL(10, 2), // SÉCURITÉ: DECIMAL pour argent (pas FLOAT qui arrondit mal)
     defaultValue: 0,
     allowNull: false,
   },

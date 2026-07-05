@@ -127,23 +127,18 @@ exports.updateFcmToken = async (req, res) => {
 // ── DELETE /account (RGPD) ────────────────────────────────────────────────────
 exports.deleteAccount = async (req, res) => {
   try {
+    const RgpdService = require('../services/rgpd.service');
     const userId = req.user.id;
-    const anonymEmail = `deleted_${uuidv4()}@nanei.app`;
 
-    await User.update(
-      {
-        nom: 'Utilisateur supprimé',
-        prenom: '',
-        email: anonymEmail,
-        telephone: null,
-        mot_de_passe: 'DELETED',
-        statut: 'inactif',
-        fcm_token: null,
-      },
-      { where: { id: userId } }
-    );
+    // SÉCURITÉ: Hard delete conforme RGPD (pas d'anonymisation)
+    const result = await RgpdService.deleteUserAccount(userId);
 
-    return res.status(200).json({ message: 'Compte supprimé (anonymisé) avec succès' });
+    if (!result.success) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    logger.info('Compte supprimé par l\'utilisateur lui-même', { user_id: userId });
+    return res.status(200).json({ message: result.message });
   } catch (err) {
     logger.error('Erreur dans deleteAccount', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ message: 'Erreur serveur lors de la suppression du compte' });

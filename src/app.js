@@ -13,6 +13,17 @@ app.set('trust proxy', 1);
 // Middlewares globaux
 app.use(helmet());
 app.use(cors(corsConfig));
+
+// SÉCURITÉ: Capturer le body brut pour validation signature webhook
+app.use((req, res, next) => {
+  let data = '';
+  req.on('data', chunk => data += chunk);
+  req.on('end', () => {
+    req.rawBody = data;
+    next();
+  });
+});
+
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(rateLimit(rateLimitConfig));
@@ -71,6 +82,11 @@ require('./jobs/rapport.job');
 
 // Serveur fichiers statiques pour les uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// SÉCURITÉ: Healthcheck pour orchestrateurs (Docker, K8s)
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK' });
+});
 
 // Définition des routes
 app.use('/nanei/auth', authRoutes);
