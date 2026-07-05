@@ -6,7 +6,8 @@ const cron = require('node-cron');
 const path = require('path');
 const fs = require('fs');
 const { Op, fn, col, literal } = require('sequelize');
-const puppeteer = require('puppeteer');
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 const { Paiement, Colis, Utilisateur } = require('../models');
 const { sendEmail } = require('../services/resend.service');
 const logger = require('../config/logger');
@@ -115,8 +116,9 @@ async function genererRapportMensuel() {
 
   // Générer le PDF
   const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    headless: true,
+    args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
+    executablePath: await chromium.executablePath(),
   });
 
   let buffer;

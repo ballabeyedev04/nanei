@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const puppeteer = require('puppeteer');
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 
 const LOGO_B64 = (() => {
   try {
@@ -304,8 +305,9 @@ async function genererEtiquette(colisData) {
   const html = etiquetteHtml(colisData);
 
   const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    headless: true,
+    args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
+    executablePath: await chromium.executablePath(),
   });
 
   try {
