@@ -29,10 +29,9 @@ jobs:
             git pull --rebase origin main
 
             # Rebuilder et relancer uniquement le backend (PostgreSQL reste intact)
+            # Pas de migrations séparées : le schéma est géré par sequelize.sync()
+            # au démarrage du serveur (voir src/server.js), pas de script "migrate".
             docker compose -f docker-compose.prod.yml up -d --build backend
-
-            # Lancer les nouvelles migrations si besoin
-            docker compose -f docker-compose.prod.yml exec -T backend npm run migrate
 
             # Vérifier que le backend est healthy — port hôte 4000 (voir
             # docker-compose.prod.yml, mappé sur le port 3000 du conteneur)
