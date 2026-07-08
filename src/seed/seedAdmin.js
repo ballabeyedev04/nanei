@@ -1,38 +1,44 @@
-//creation admin automatiquement 
+// Création de l'admin par défaut au 1er démarrage, si absent.
+// Identifiants pilotés par .env (ADMIN_EMAIL/ADMIN_PASSWORD/...) — jamais
+// codés en dur, sinon le compte réellement créé ne correspond pas à ce que
+// l'opérateur configure et s'attend à utiliser pour se connecter.
 const bcrypt = require("bcrypt");
-const { Utilisateur } = require("../models"); // adapte le chemin
+const { Utilisateur } = require("../models");
+const { bcryptConfig } = require("../config/security");
+const logger = require("../config/logger");
 
 const seedAdmin = async () => {
     try {
-        const adminEmail = "admin@gmail.com";
+        const adminEmail = process.env.ADMIN_EMAIL;
+        const adminPassword = process.env.ADMIN_PASSWORD;
 
-        // 1. Vérifier si admin existe déjà
-        const exist = await Utilisateur.findOne({
-            where: { email: adminEmail }
-        });
-
-        if (exist) {
-            console.log("👤 Admin déjà existant");
+        if (!adminEmail || !adminPassword) {
+            logger.error("Seed admin impossible : ADMIN_EMAIL / ADMIN_PASSWORD manquants dans .env");
             return;
         }
 
-        // 2. Créer admin
-        const hashedPassword = await bcrypt.hash("Passer123", 10);
+        const exist = await Utilisateur.findOne({ where: { email: adminEmail } });
+        if (exist) {
+            logger.info("Admin déjà existant, seed ignoré");
+            return;
+        }
+
+        const hashedPassword = await bcrypt.hash(adminPassword, bcryptConfig.saltRounds);
 
         await Utilisateur.create({
-            nom: "Admin",
-            prenom: "Admin",
+            nom: process.env.ADMIN_NOM || "Admin",
+            prenom: process.env.ADMIN_PRENOM || "Nanei",
             email: adminEmail,
             mot_de_passe: hashedPassword,
-            adresse: "Dakar, Sénégal",
-            telephone: "+2217734444",
-            role: "Admin"
+            adresse: process.env.ADMIN_ADRESSE || "Dakar, Sénégal",
+            role: "Admin",
+            statut: "actif"
         });
 
-        console.log("✅ Admin créé avec succès");
+        logger.info(`Admin créé avec succès : ${adminEmail}`);
 
     } catch (error) {
-        console.error("❌ Erreur seed admin :", error.message);
+        logger.error("Erreur seed admin", { error: error.message, stack: error.stack });
     }
 };
 
