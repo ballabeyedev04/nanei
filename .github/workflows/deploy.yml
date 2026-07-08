@@ -18,10 +18,15 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
             cd /var/www/nanei-api
 
-            # Récupérer le nouveau code
-            git pull origin main
+            # Récupérer le nouveau code — `set -e` fait échouer tout le
+            # déploiement si le pull échoue, au lieu de continuer
+            # silencieusement avec l'ancien code.
+            # --rebase : évite un conflit de branches divergentes si le VPS
+            # a un jour un commit local (config spécifique à la machine).
+            git pull --rebase origin main
 
             # Rebuilder et relancer uniquement le backend (PostgreSQL reste intact)
             docker compose -f docker-compose.prod.yml up -d --build backend
@@ -29,6 +34,7 @@ jobs:
             # Lancer les nouvelles migrations si besoin
             docker compose -f docker-compose.prod.yml exec -T backend npm run migrate
 
-            # Vérifier que le backend est healthy
+            # Vérifier que le backend est healthy — port hôte 4000 (voir
+            # docker-compose.prod.yml, mappé sur le port 3000 du conteneur)
             sleep 10
-            curl -f http://localhost:3000/health || exit 1
+            curl -f http://localhost:4000/health || exit 1

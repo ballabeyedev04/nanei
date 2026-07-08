@@ -53,10 +53,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # En production : Nginx écoute sur 443 et proxifie vers 127.0.0.1:3000
-    # On publie uniquement sur 127.0.0.1 (loopback) pour que Nginx seul y accède
+    # En production : Nginx écoute sur 443 et proxifie vers 127.0.0.1:4000
+    # (voir upstream nanei_backend dans /etc/nginx/sites-available/nanei).
+    # Port hôte 4000 délibérément différent du port conteneur 3000 : le port
+    # 3000 est déjà utilisé par sign_backend sur ce même VPS mutualisé.
+    # On publie uniquement sur 127.0.0.1 (loopback) pour que Nginx seul y accède.
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4000:3000"
     env_file:
       - .env
     environment:
