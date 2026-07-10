@@ -131,6 +131,10 @@ class EnvoieColisService {
 
       const clients = await Utilisateur.findAll({
         where: {
+          // Whitelist explicite : seuls les comptes Particulier sont
+          // sélectionnables comme destinataire. Ne jamais exposer les
+          // comptes Admin (email/identité) à la recherche client.
+          role: 'Particulier',
           [Op.or]: [
             { nom: { [Op.like]: `%${searchTerm}%` } },
             { prenom: { [Op.like]: `%${searchTerm}%` } },
