@@ -3,6 +3,7 @@ const router = express.Router();
 const controller = require('../../controllers/admin/gestionutilisateur.controller');
 const authMiddleware = require('../../middlewares/auth.middleware');
 const isAdmin = require('../../middlewares/isAdmin.middlewares');
+const auditLog = require('../../middlewares/auditlog.middleware');
 
 // 🔹 liste utilisateurs particuliers
 router.get(
@@ -17,6 +18,7 @@ router.patch(
   '/activer-utilisateurs/:id',
   authMiddleware,
   isAdmin,
+  auditLog('ACTIVATE', 'Utilisateur'),
   controller.activerUtilisateur
 );
 
@@ -25,6 +27,7 @@ router.patch(
   '/desactiver-utilisateurs/:id',
   authMiddleware,
   isAdmin,
+  auditLog('DEACTIVATE', 'Utilisateur'),
   controller.desactiverUtilisateur
 );
 

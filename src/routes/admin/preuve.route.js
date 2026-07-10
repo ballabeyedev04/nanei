@@ -3,6 +3,7 @@ const router = express.Router();
 const preuveController = require('../../controllers/admin/preuve.controller');
 const auth = require('../../middlewares/auth.middleware');
 const isAdmin = require('../../middlewares/isAdmin.middlewares');
+const auditLog = require('../../middlewares/auditlog.middleware');
 
 // POST /nanei/admin/colis/:colisId/preuve
 router.post(
@@ -10,6 +11,7 @@ router.post(
   auth,
   isAdmin,
   preuveController.upload.single('photo'),
+  auditLog('CREATE', 'PreuveLivraison'),
   preuveController.ajouterPreuve
 );
 

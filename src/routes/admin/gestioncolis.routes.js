@@ -3,6 +3,7 @@ const router = express.Router();
 const controller = require('../../controllers/admin/gestoncolis.controller');
 const authMiddleware = require('../../middlewares/auth.middleware');
 const isAdmin = require('../../middlewares/isAdmin.middlewares');
+const auditLog = require('../../middlewares/auditlog.middleware');
 
 
 /* ===================== COLIS ===================== */
@@ -76,6 +77,7 @@ router.put(
     '/changer-statut-en-attente/:id',
     authMiddleware,
     isAdmin,
+    auditLog('UPDATE_STATUT', 'Colis'),
     controller.changerEnAttente
 );
 
@@ -84,6 +86,7 @@ router.put(
     '/changer-statut-livre/:id',
     authMiddleware,
     isAdmin,
+    auditLog('UPDATE_STATUT', 'Colis'),
     controller.changerEnLivre
 );
 // marquer récupéré
@@ -91,6 +94,7 @@ router.put(
     '/changer-statut-recupere/:id',
     authMiddleware,
     isAdmin,
+    auditLog('UPDATE_STATUT', 'Colis'),
     controller.changerEnRecupere
 );
 module.exports = router;

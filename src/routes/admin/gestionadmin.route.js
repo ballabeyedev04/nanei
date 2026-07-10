@@ -3,6 +3,7 @@ const router = express.Router();
 const controller = require('../../controllers/admin/gestionadmin.controller');
 const authMiddleware = require('../../middlewares/auth.middleware');
 const isAdmin = require('../../middlewares/isAdmin.middlewares');
+const auditLog = require('../../middlewares/auditlog.middleware');
 
 //liste admins
 router.get(
@@ -17,6 +18,7 @@ router.post(
     '/ajouter-admin',
     authMiddleware,
     isAdmin,
+    auditLog('CREATE', 'Admin'),
     controller.ajouterAdmin
 );
 
@@ -25,6 +27,7 @@ router.put(
     '/activer-admin/:id',
     authMiddleware,
     isAdmin,
+    auditLog('ACTIVATE', 'Admin'),
     controller.activerAdmin
 );
 
@@ -33,6 +36,7 @@ router.put(
     '/desactiver-admin/:id',
     authMiddleware,
     isAdmin,
+    auditLog('DEACTIVATE', 'Admin'),
     controller.desactiverAdmin
 );
 
