@@ -51,6 +51,14 @@ const User = sequelize.define('User', {
     type: DataTypes.DATE,
     allowNull: true
   },
+  // Horodatage du dernier changement de mot de passe — permet d'invalider
+  // tout JWT émis AVANT ce changement (via auth.middleware), même si son
+  // expiration n'est pas encore atteinte. Nécessaire car l'architecture est
+  // en JWT stateless (pas de table de sessions/refresh tokens à révoquer).
+  passwordChangedAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
   otpCode: {
     type: DataTypes.STRING(6),
     allowNull: true

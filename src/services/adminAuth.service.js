@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const Utilisateur = require('../models/utilisateur.model');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -10,6 +11,15 @@ const adminResetTemplate = require('../templates/mail/adminResetPassword.templat
  */
 const RESET_EXPIRES_MS = 10 * 60 * 1000; // 10 min en ms
 const RESET_EXPIRES_JWT = '10m';
+
+// Temps de réponse minimum imposé à forgotPassword() — neutralise la faille
+// de timing où le chemin "compte éligible" (JWT + écriture DB + envoi email)
+// prend nettement plus longtemps que les chemins "compte inexistant/non
+// éligible" (retour quasi instantané), ce qui permettait de deviner si un
+// email correspond à un admin actif en mesurant le temps de réponse.
+const MIN_RESPONSE_MS = 400;
+
+const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 class AdminAuthService {
 
@@ -32,49 +42,66 @@ class AdminAuthService {
         'Si cet email correspond à un compte administrateur actif, un lien de réinitialisation vous a été envoyé.'
     };
 
+    const startedAt = Date.now();
+
     try {
       const emailClean = email.trim().toLowerCase();
       const utilisateur = await Utilisateur.findOne({ where: { email: emailClean } });
 
-      // Vérifications silencieuses (on ne révèle rien au client)
-      if (!utilisateur) return GENERIC_OK;
-      if (utilisateur.role !== 'Admin') return GENERIC_OK;
-      if (utilisateur.statut !== 'actif') return GENERIC_OK;
+      const eligible =
+        !!utilisateur && utilisateur.role === 'Admin' && utilisateur.statut === 'actif';
 
-      // Génère un token JWT signé avec le secret de reset
-      const payload = {
-        id: utilisateur.id,
-        email: utilisateur.email,
-        role: utilisateur.role,
-        purpose: 'admin-password-reset' // champ purpose pour éviter la réutilisation de tokens d'autres flows
-      };
-      const resetToken = jwt.sign(payload, jwtConfig.resetSecret, {
-        expiresIn: RESET_EXPIRES_JWT
-      });
+      if (eligible) {
+        // Génère un token opaque aléatoire — seul son hash est stocké en
+        // base (comme un mot de passe), jamais le token en clair. Si la
+        // base fuit, les tokens stockés sont inutilisables tels quels.
+        const rawToken = crypto.randomBytes(32).toString('hex');
 
-      // Stocke l'expiration en base (double vérification côté DB)
-      utilisateur.resetPasswordToken = resetToken;
-      utilisateur.resetPasswordExpires = new Date(Date.now() + RESET_EXPIRES_MS);
-      await utilisateur.save();
+        // Le JWT reste utilisé comme enveloppe transmise au client (purpose
+        // + expiration auto-vérifiable), mais la vérité côté serveur est le
+        // hash du token opaque, pas la signature JWT seule.
+        const payload = {
+          id: utilisateur.id,
+          email: utilisateur.email,
+          role: utilisateur.role,
+          purpose: 'admin-password-reset',
+          rawToken
+        };
+        const resetToken = jwt.sign(payload, jwtConfig.resetSecret, {
+          expiresIn: RESET_EXPIRES_JWT
+        });
 
-      // Construit le lien vers le frontend admin
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const resetLink = `${frontendUrl}/nanei/admin/reset-password?token=${resetToken}`;
+        utilisateur.resetPasswordToken = hashToken(rawToken);
+        utilisateur.resetPasswordExpires = new Date(Date.now() + RESET_EXPIRES_MS);
+        await utilisateur.save();
 
-      // Envoi email
-      await sendEmail({
-        to: utilisateur.email,
-        subject: '🔒 Réinitialisation de votre mot de passe administrateur Nanei',
-        html: adminResetTemplate({
-          nom: utilisateur.nom,
-          prenom: utilisateur.prenom,
-          resetLink
-        })
-      });
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const resetLink = `${frontendUrl}/nanei/admin/reset-password?token=${resetToken}`;
+
+        await sendEmail({
+          to: utilisateur.email,
+          subject: '🔒 Réinitialisation de votre mot de passe administrateur Nanei',
+          html: adminResetTemplate({
+            nom: utilisateur.nom,
+            prenom: utilisateur.prenom,
+            resetLink
+          })
+        });
+      }
+
+      // Temps de réponse constant : neutralise le side-channel de timing
+      // entre le chemin "compte éligible" (plus lent) et les autres.
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < MIN_RESPONSE_MS) {
+        await new Promise((r) => setTimeout(r, MIN_RESPONSE_MS - elapsed));
+      }
 
       return GENERIC_OK;
     } catch (error) {
-      // On propage l'erreur (erreur serveur, pas une erreur métier)
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < MIN_RESPONSE_MS) {
+        await new Promise((r) => setTimeout(r, MIN_RESPONSE_MS - elapsed));
+      }
       throw error;
     }
   }
@@ -127,9 +154,12 @@ class AdminAuthService {
         return { success: false, message: 'Votre compte est désactivé. Contactez le support.' };
       }
 
-      // 6. Double vérification côté DB — le token stocké doit correspondre ET ne pas être expiré
+      // 6. Double vérification côté DB — le hash du token stocké doit
+      // correspondre à celui transporté dans le JWT, ET ne pas être expiré.
+      const incomingHash = decoded.rawToken ? hashToken(decoded.rawToken) : null;
       if (
-        utilisateur.resetPasswordToken !== token ||
+        !incomingHash ||
+        utilisateur.resetPasswordToken !== incomingHash ||
         !utilisateur.resetPasswordExpires ||
         new Date() > utilisateur.resetPasswordExpires
       ) {
@@ -145,11 +175,12 @@ class AdminAuthService {
         return { success: false, message: policyError };
       }
 
-      // 8. Hacher et sauvegarder
+      // 8. Hacher et sauvegarder + invalider toute session déjà émise
       const hashedPassword = await bcrypt.hash(nouveauMotDePasse, bcryptConfig.saltRounds);
       utilisateur.mot_de_passe = hashedPassword;
       utilisateur.resetPasswordToken = null;
       utilisateur.resetPasswordExpires = null;
+      utilisateur.passwordChangedAt = new Date();
       await utilisateur.save();
 
       return {
