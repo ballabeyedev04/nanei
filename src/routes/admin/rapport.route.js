@@ -5,8 +5,25 @@ const fs = require('fs');
 const auth = require('../../middlewares/auth.middleware');
 const logger = require('../../config/logger');
 const isAdmin = require('../../middlewares/isAdmin.middlewares');
+const auditLog = require('../../middlewares/auditlog.middleware');
+const { genererRapportMensuel } = require('../../jobs/rapport.job');
 
 const RAPPORTS_DIR = path.join(__dirname, '../../uploads/rapports');
+
+// POST /nanei/admin/rapports/generer — génération manuelle à la demande
+router.post('/generer', auth, isAdmin, auditLog('GENERATE', 'Rapport'), async (req, res) => {
+  try {
+    const { filename, moisLabel, caTotal, nbColis } = await genererRapportMensuel();
+    return res.status(200).json({
+      success: true,
+      message: `Rapport de ${moisLabel} généré avec succès`,
+      rapport: { filename, moisLabel, caTotal, nbColis, url: `/uploads/rapports/${filename}` },
+    });
+  } catch (err) {
+    logger.error('Rapports erreur génération manuelle', { error: err.message, stack: err.stack });
+    return res.status(500).json({ success: false, message: 'Erreur lors de la génération du rapport' });
+  }
+});
 
 // GET /nanei/admin/rapports — liste des fichiers
 router.get('/', auth, isAdmin, (req, res) => {

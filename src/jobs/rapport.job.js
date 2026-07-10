@@ -176,4 +176,6 @@ cron.schedule('0 6 1 * *', async () => {
   }
 });
 
-logger.info('[Job Rapport] Planifié — le 1er de chaque mois à 6h00');;
+logger.info('[Job Rapport] Planifié — le 1er de chaque mois à 6h00');
+
+module.exports = { genererRapportMensuel };
