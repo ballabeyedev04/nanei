@@ -4,7 +4,7 @@ const logger = require('../../config/logger');
 // ===================== LISTE ADMINS =====================
 exports.listeAdmins = async (req, res) => {
     try {
-        const result = await GestionAdminService.listeAdmins();
+        const result = await GestionAdminService.listeAdmins(req.user.id);
 
         return res.status(200).json(result);
 

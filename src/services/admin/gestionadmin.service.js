@@ -5,11 +5,16 @@ const bcrypt = require('bcrypt');
 class GestionAdminService {
 
     // ===================== LISTE ADMINS =====================
-    static async listeAdmins() {
+    static async listeAdmins(currentAdminId) {
         try {
-            const admins = await Utilisateur.findAll({
-                where: { role: 'Admin' }
-            });
+            const where = { role: 'Admin' };
+            // L'admin connecté ne doit pas se voir lui-même dans la liste — il
+            // gère son propre compte depuis "Mon profil", pas depuis cette page.
+            if (currentAdminId) {
+                where.id = { [Op.ne]: currentAdminId };
+            }
+
+            const admins = await Utilisateur.findAll({ where });
 
             return {
                 success: true,
