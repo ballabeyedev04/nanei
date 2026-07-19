@@ -48,11 +48,12 @@ function etiquetteHtml(data) {
     expediteurNom,
     expediteurPrenom,
     expediteurTelephone,
-    expediteurVille,
+    expediteurEmail,
+    expediteurPays,
     recepteurNom,
     recepteurPrenom,
     recepteurTelephone,
-    recepteurVille,
+    recepteurEmail,
     recepteurPays,
     typeTransport,
     poids,
@@ -263,8 +264,9 @@ function etiquetteHtml(data) {
     <div class="section-name">${expediteurPrenom || ''} ${expediteurNom || ''}</div>
     <div class="section-detail">
       Tél : ${masquerTel(expediteurTelephone)}<br/>
-      ${expediteurVille || ''}
+      ${expediteurEmail || '—'}
     </div>
+    <div class="section-pays">${expediteurPays || ''}</div>
   </div>
 
   <!-- Destinataire -->
@@ -273,7 +275,7 @@ function etiquetteHtml(data) {
     <div class="section-name">${recepteurPrenom || ''} ${recepteurNom || ''}</div>
     <div class="section-detail">
       Tél : ${recepteurTelephone || '—'}<br/>
-      ${recepteurVille || ''}
+      ${recepteurEmail || '—'}
     </div>
     <div class="section-pays">${recepteurPays || ''}</div>
   </div>

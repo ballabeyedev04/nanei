@@ -47,6 +47,7 @@ const factureRoutes         = require('./routes/client/facture.route');
 const pricingRoutes = require('./routes/pricing.route');
 const trackingRoutes = require('./routes/tracking.route');
 const etiquetteRoutes = require('./routes/client/etiquette.route');
+const etiquetteAdminRoutes = require('./routes/admin/etiquette.route');
 const reclamationClientRoutes = require('./routes/client/reclamation.route');
 const reclamationAdminRoutes = require('./routes/admin/reclamation.route');
 const contactRoutes = require('./routes/client/contact.route');
@@ -123,6 +124,7 @@ app.use('/nanei/pricing', pricingRoutes);
 
 app.use('/nanei/suivi', trackingRoutes);
 app.use('/nanei/etiquettes', etiquetteRoutes);
+app.use('/nanei/admin/etiquettes', etiquetteAdminRoutes);
 app.use('/nanei/reclamations', reclamationClientRoutes);
 app.use('/nanei/admin/reclamations', reclamationAdminRoutes);
 app.use('/nanei/contacts', contactRoutes);
