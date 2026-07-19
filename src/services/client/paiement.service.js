@@ -20,7 +20,23 @@ class ClientPaiementService {
       }],
       order: [['created_at', 'DESC']],
     });
-    return { success: true, data: paiements };
+    // Les colonnes DECIMAL (prixTotal, montantPaye, colis.prix, colis.poids)
+    // sont renvoyées en String par Sequelize/pg pour préserver la précision —
+    // le mobile fait un cast strict `as num` dessus et crashe ("type 'String'
+    // is not a subtype of type 'num'"). On les convertit explicitement en
+    // nombre uniquement à la sérialisation JSON, sans toucher au calcul/
+    // stockage interne qui reste en DECIMAL.
+    const data = paiements.map((p) => {
+      const json = p.toJSON();
+      json.prixTotal = Number(json.prixTotal);
+      json.montantPaye = Number(json.montantPaye);
+      if (json.colis) {
+        json.colis.prix = json.colis.prix != null ? Number(json.colis.prix) : json.colis.prix;
+        json.colis.poids = json.colis.poids != null ? Number(json.colis.poids) : json.colis.poids;
+      }
+      return json;
+    });
+    return { success: true, data };
   }
 
   /**

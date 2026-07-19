@@ -1,9 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const path = require('path');
-const { corsConfig, rateLimitConfig } = require('./config/security');
+const { corsConfig } = require('./config/security');
+const { authenticatedRateLimit, adminRateLimit } = require('./middlewares/rateLimit.middleware');
 
 const app = express();
 
@@ -16,7 +16,10 @@ app.use(cors(corsConfig));
 
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(rateLimit(rateLimitConfig));
+// Quota par utilisateur connecté (fallback IP si non authentifié) — évite
+// que des utilisateurs mobiles partageant la même IP opérateur épuisent
+// ensemble un seul quota global (cause des 429 "trop d'utilisation").
+app.use(authenticatedRateLimit);
 
 // Request logger
 const requestLogger = require('./middlewares/requestLogger.middleware');
@@ -77,6 +80,24 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK' });
 });
+
+// Compat mobile : certains écrans de l'app construisent déjà une URL de
+// base finissant par /nanei puis y ajoutent un chemin qui recommence par
+// /nanei/... (ex: /nanei/nanei/etiquettes/:id, /nanei/nanei/reclamations),
+// ce qui donnait des 404. On normalise ce préfixe dupliqué en amont des
+// routes le temps qu'une nouvelle version mobile corrige l'URL à la source.
+app.use((req, res, next) => {
+  if (req.url.startsWith('/nanei/nanei/')) {
+    req.url = req.url.replace('/nanei/nanei/', '/nanei/');
+  }
+  next();
+});
+
+// Rate limit dédié sur tout le sous-arbre /nanei/admin — toutes les routes
+// admin sont déjà protégées par isAdmin, mais on limite quand même le volume
+// de requêtes (200 req/15min/IP), au cas où un compte admin serait compromis
+// ou un script mal écrit boucle sur un endpoint.
+app.use('/nanei/admin', adminRateLimit);
 
 // Définition des routes
 app.use('/nanei/auth', authRoutes);

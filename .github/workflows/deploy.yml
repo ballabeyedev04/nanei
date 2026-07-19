@@ -17,6 +17,10 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          # Le build Docker peut dépasser les 10 minutes par défaut
+          # d'appleboy/ssh-action et couper la connexion SSH avant même
+          # d'arriver à `docker compose up -d` (vu sur le backend Sign).
+          command_timeout: "30m"
           script: |
             set -e
             cd /var/www/nanei-api
@@ -29,9 +33,13 @@ jobs:
             git pull --rebase origin main
 
             # Rebuilder et relancer uniquement le backend (PostgreSQL reste intact)
-            # Pas de migrations séparées : le schéma est géré par sequelize.sync()
-            # au démarrage du serveur (voir src/server.js), pas de script "migrate".
             docker compose -f docker-compose.prod.yml up -d --build backend
+
+            # Lancer les nouvelles migrations (src/migrations/) — le schéma
+            # n'est plus altéré via sequelize.sync({alter:true}) en
+            # production (voir src/server.js), tout changement de structure
+            # passe désormais par une migration versionnée.
+            docker compose -f docker-compose.prod.yml exec -T backend npm run migrate
 
             # Vérifier que le backend est healthy — port hôte 4000 (voir
             # docker-compose.prod.yml, mappé sur le port 3000 du conteneur)

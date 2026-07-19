@@ -1,11 +1,8 @@
 const Utilisateur = require('../models/utilisateur.model');
-const UserOtp     = require('../models/userOtp.model');
 const bcrypt      = require('bcrypt');
-const crypto      = require('crypto');
 const sequelize   = require('../config/db');
 const logger      = require('../config/logger');
 const { bcryptConfig } = require('../config/security');
-const { sendOtpEmail } = require('./resend.service');
 
 class AccountService {
 
@@ -18,89 +15,9 @@ class AccountService {
     return { success: true, utilisateur };
   }
 
-  // ── MOT DE PASSE OUBLIÉ (OTP par email) ──────────────────────────────────────
-  static _generateOtp(length = 8) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let otp = '';
-    const bytes = crypto.randomBytes(length);
-    for (let i = 0; i < length; i++) {
-      otp += chars[bytes[i] % chars.length];
-    }
-    return otp;
-  }
-
-  static async forgotPassword(email) {
-    try {
-      const utilisateur = await Utilisateur.findOne({ where: { email } });
-      if (!utilisateur) {
-        // Réponse générique — ne révèle pas si le compte existe
-        return { message: "Si un compte existe avec cet email, un code de réinitialisation a été envoyé." };
-      }
-
-      const otp       = AccountService._generateOtp(8);
-      const otpHash   = await bcrypt.hash(otp, bcryptConfig.saltRounds);
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
-
-      // Supprimer l'ancien OTP si existant, puis créer le nouveau
-      await UserOtp.destroy({ where: { utilisateurId: utilisateur.id } });
-      await UserOtp.create({ utilisateurId: utilisateur.id, otpHash, expiresAt });
-
-      await sendOtpEmail({ to: email, nom: utilisateur.nom, otp });
-
-      return { message: "Un code de réinitialisation a été envoyé à votre adresse email." };
-    } catch (error) {
-      logger.error('Erreur forgotPassword', { error: error.message, stack: error.stack });
-      throw error;
-    }
-  }
-
-  // ── RÉINITIALISATION MOT DE PASSE (OTP) ──────────────────────────────────────
-  static async resetPassword(email, otpRecu, newPassword) {
-    try {
-      const utilisateur = await Utilisateur.findOne({ where: { email } });
-      if (!utilisateur) {
-        return { error: 'Aucun compte trouvé avec cet email.' };
-      }
-
-      const otpRecord = await UserOtp.findOne({ where: { utilisateurId: utilisateur.id } });
-      if (!otpRecord) {
-        return { error: 'Aucun code de réinitialisation trouvé. Veuillez refaire la demande.' };
-      }
-
-      // SÉCURITÉ: Vérifier le blocage (brute-force protection)
-      if (otpRecord.lockedUntil && new Date() < otpRecord.lockedUntil) {
-        const minutesRestantes = Math.ceil((otpRecord.lockedUntil - new Date()) / 60000);
-        return { error: `Trop de tentatives. Réessayez dans ${minutesRestantes} minute(s).` };
-      }
-
-      if (new Date() > otpRecord.expiresAt) {
-        await otpRecord.destroy();
-        return { error: 'Le code a expiré. Veuillez refaire la demande.' };
-      }
-
-      const isValid = await bcrypt.compare(otpRecu.toUpperCase().trim(), otpRecord.otpHash);
-      if (!isValid) {
-        // SÉCURITÉ: Incrémenter les tentatives échouées et bloquer après 3
-        await otpRecord.increment('failedAttempts');
-        if (otpRecord.failedAttempts + 1 >= 3) {
-          const lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // Blocage 15 min
-          await otpRecord.update({ lockedUntil });
-          logger.warn(`OTP brute-force : compte bloqué`, { user_id: utilisateur.id, attempts: otpRecord.failedAttempts + 1 });
-          return { error: `Trop de tentatives. Réessayez dans 15 minutes.` };
-        }
-        return { error: `Code incorrect (${3 - otpRecord.failedAttempts - 1} tentatives restantes).` };
-      }
-
-      utilisateur.mot_de_passe = await bcrypt.hash(newPassword, bcryptConfig.saltRounds);
-      await utilisateur.save();
-      await otpRecord.destroy();
-
-      return { message: 'Mot de passe réinitialisé avec succès.' };
-    } catch (error) {
-      logger.error('Erreur resetPassword', { error: error.message, stack: error.stack });
-      throw error;
-    }
-  }
+  // NB : forgotPassword / resetPassword (OTP) ont été retirés (dead code,
+  // jamais appelés — le mobile utilise AuthService.oublierPassword/
+  // resetPassword, voir services/auth.service.js).
 
   // ── CHANGER MOT DE PASSE ──────────────────────────────────────────────────────
   static async changePassword(userId, oldPassword, newPassword) {

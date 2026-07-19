@@ -52,43 +52,9 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-// ── POST /forgot-password ─────────────────────────────────────────────────────
-exports.forgotPassword = async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ message: "L'email est obligatoire" });
-  }
-
-  try {
-    const result = await AccountService.forgotPassword(email);
-
-    if (result.error) {
-      return res.status(404).json({ message: result.error });
-    }
-
-    return res.status(200).json({ message: result.message });
-  } catch (error) {
-    logger.error('Erreur dans forgotPassword', { error: error.message, stack: error.stack });
-    return res.status(500).json({ message: "Erreur serveur lors de la demande de réinitialisation" });
-  }
-};
-
-// ── POST /reset-password ──────────────────────────────────────────────────────
-exports.resetPassword = async (req, res) => {
-  const { email, otpRecu, mot_de_passe } = req.body;
-
-  try {
-    const result = await AccountService.resetPassword(email, otpRecu, mot_de_passe);
-    if (result.error) {
-      return res.status(400).json({ message: result.error });
-    }
-    return res.status(200).json({ message: result.message });
-  } catch (error) {
-    logger.error('Erreur dans resetPassword', { error: error.message, stack: error.stack });
-    return res.status(500).json({ message: "Erreur serveur lors de la réinitialisation du mot de passe" });
-  }
-};
+// NB : forgotPassword / resetPassword ont été retirés (dead code, jamais
+// appelés — le mobile utilise /auth/oublier-password et /auth/reset-password,
+// voir auth.route.js + auth.controller.js).
 
 // ── PUT /change-password ──────────────────────────────────────────────────────
 exports.changePassword = async (req, res) => {

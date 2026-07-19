@@ -6,8 +6,7 @@ const cron = require('node-cron');
 const path = require('path');
 const fs = require('fs');
 const { Op, fn, col, literal } = require('sequelize');
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+const htmlToPdf = require('../utils/htmlToPdf');
 const { Paiement, Colis, Utilisateur } = require('../models');
 const { sendEmail } = require('../services/resend.service');
 const logger = require('../config/logger');
@@ -115,20 +114,10 @@ async function genererRapportMensuel() {
 </html>`;
 
   // Générer le PDF
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
-    executablePath: await chromium.executablePath(),
+  const buffer = await htmlToPdf(html, {
+    format: 'A4',
+    margin: { top: '0', right: '0', bottom: '0', left: '0' },
   });
-
-  let buffer;
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    buffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '0', right: '0', bottom: '0', left: '0' } });
-  } finally {
-    await browser.close();
-  }
 
   // Sauvegarder le fichier
   const rapportsDir = path.join(__dirname, '../uploads/rapports');

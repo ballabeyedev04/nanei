@@ -4,11 +4,9 @@ const accountController = require('../controllers/account.controller');
 const upload   = require('../middlewares/upload.middleware');
 const auth     = require('../middlewares/auth.middleware');
 const checkActiveUser = require('../middlewares/checkActiveUser.middleware');
-const { authRateLimit } = require('../middlewares/rateLimit.middleware');
+const { mutationRateLimit } = require('../middlewares/rateLimit.middleware');
 const validate = require('../middlewares/validate.middleware');
 const {
-  forgotPasswordSchema,
-  resetPasswordSchema,
   changePasswordSchema,
   modifierProfilSchema
 } = require('../validations/account.validation');
@@ -21,30 +19,22 @@ router.put(
   '/modifier-profil',
   auth,
   checkActiveUser,
+  mutationRateLimit,
   upload.single('photoProfil'),
   validate(modifierProfilSchema),
   accountController.updateProfile
 );
 
+// NB : /forgot-password et /reset-password ont été retirés (dead code,
+// jamais appelés — le mobile utilise /auth/oublier-password et
+// /auth/reset-password, voir routes/auth.route.js).
+
 // ── Mot de passe ──────────────────────────────────────────────────────────────
-router.post(
-  '/forgot-password',
-  authRateLimit,
-  validate(forgotPasswordSchema),
-  accountController.forgotPassword
-);
-
-router.post(
-  '/reset-password',
-  authRateLimit,
-  validate(resetPasswordSchema),
-  accountController.resetPassword
-);
-
 router.put(
   '/change-password',
   auth,
   checkActiveUser,
+  mutationRateLimit,
   validate(changePasswordSchema),
   accountController.changePassword
 );
@@ -53,6 +43,6 @@ router.put(
 router.post('/fcm-token', auth, accountController.updateFcmToken);
 
 // ── Suppression de compte (RGPD) ──────────────────────────────────────────────
-router.delete('/', auth, accountController.deleteAccount);
+router.delete('/', auth, mutationRateLimit, accountController.deleteAccount);
 
 module.exports = router;

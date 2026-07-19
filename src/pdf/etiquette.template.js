@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+const htmlToPdf = require('../utils/htmlToPdf');
 
 const LOGO_B64 = (() => {
   try {
@@ -304,26 +303,10 @@ function etiquetteHtml(data) {
 async function genererEtiquette(colisData) {
   const html = etiquetteHtml(colisData);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
-    executablePath: await chromium.executablePath(),
+  return htmlToPdf(html, {
+    format: 'A6',
+    margin: { top: '0', right: '0', bottom: '0', left: '0' },
   });
-
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-
-    const buffer = await page.pdf({
-      format: 'A6',
-      printBackground: true,
-      margin: { top: '0', right: '0', bottom: '0', left: '0' },
-    });
-
-    return buffer;
-  } finally {
-    await browser.close();
-  }
 }
 
 module.exports = { genererEtiquette };

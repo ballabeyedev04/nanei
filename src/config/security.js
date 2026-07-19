@@ -50,6 +50,46 @@ const authRateLimitConfig = {
   message: { message: 'Trop de tentatives. Veuillez réessayer dans 15 minutes.' }
 };
 
+// Quota plus large pour les requêtes authentifiées, comptabilisé par
+// utilisateur (voir rateLimit.middleware.js) et non par IP — plusieurs
+// utilisateurs mobiles partagent souvent la même IP opérateur (NAT), ce qui
+// leur faisait épuiser ensemble le même quota global et déclenchait des 429
+// à tort.
+const authenticatedRateLimitConfig = {
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Trop de requêtes. Veuillez réessayer dans quelques minutes.' }
+};
+
+// Mutations sensibles (modifier profil, changer mdp, supprimer compte) — 20 req / 15 min par IP
+const mutationRateLimitConfig = {
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Trop de requêtes. Veuillez réessayer dans 15 minutes.' }
+};
+
+// Routes admin (toutes déjà protégées par isAdmin, mais on limite quand même)
+const adminRateLimitConfig = {
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Trop de requêtes admin. Veuillez réessayer.' }
+};
+
+// OTP mot de passe oublié — 3 tentatives par email par 15 min (anti ciblage multi-IP)
+const otpEmailRateLimitConfig = {
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Trop de tentatives pour cet email. Réessayez dans 15 minutes.' }
+};
+
 /**
  * CORS sécurisé
  */
@@ -90,6 +130,10 @@ module.exports = {
   bcryptConfig,
   rateLimitConfig,
   authRateLimitConfig,
+  authenticatedRateLimitConfig,
+  mutationRateLimitConfig,
+  adminRateLimitConfig,
+  otpEmailRateLimitConfig,
   corsConfig,
   cookieConfig,
   uploadConfig,

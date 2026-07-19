@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const { jwtConfig, bcryptConfig } = require('../config/security');
 const sequelize = require('../config/db');
 const crypto = require("crypto");
-const { Op } = require('sequelize');
 const logger = require('../config/logger');
 const { sendOtpEmail } = require('./resend.service');
 
@@ -153,160 +152,6 @@ class AuthService {
     return { success: true, token, utilisateur };
   }
 
-  //modifier password 
-  static async modifierPassword(id, nouveauPassword, ancienPassword) {
-    try {
-      const utilisateur = await Utilisateur.findByPk(id);
-      if (!utilisateur) {
-        return {
-          success: false,
-          message: 'Utilisateur non trouvé'
-        };
-      }
-
-      //ancien password incorect 
-      const valid = await bcrypt.compare(ancienPassword, utilisateur.mot_de_passe);
-      if (!valid) {
-        return {
-          success: false,
-          message: 'Ancien mot de passe incorrect'
-        };
-      }
-
-      //nouveau password est identique à l'ancien password
-      if (nouveauPassword === ancienPassword) {
-        return {
-          success: false,
-          message: 'Les deux mots de passe ne doit pas être identique'
-        };
-      }
-
-      //nouveau password doit contenir au moins 8 caractères
-      if (nouveauPassword.length < 8) {
-        return {
-          success: false,
-          message: 'Le nouveau mot de passe doit contenir au moins 8 caractères'
-        };
-      }
-
-      //nouveau password doit contenir au moins une lettre majuscule
-      if (!/[A-Z]/.test(nouveauPassword)) {
-        return {
-          success: false,
-          message: 'Le nouveau mot de passe doit contenir au moins une lettre majuscule'
-        };
-      }
-
-      //nouveau password doit contenir au moins une lettre minuscule
-      if (!/[a-z]/.test(nouveauPassword)) {
-        return {
-          success: false,
-          message: 'Le nouveau mot de passe doit contenir au moins une lettre minuscule'
-        };
-      }
-
-      //nouveau password doit contenir au moins un chiffre
-      if (!/[0-9]/.test(nouveauPassword)) {
-        return {
-          success: false,
-          message: 'Le nouveau mot de passe doit contenir au moins un chiffre'
-        };
-      }
-
-      //nouveau password doit contenir au moins un caractère spécial
-      if (!/[!@#$%^&*]/.test(nouveauPassword)) {
-        return {
-          success: false,
-          message: 'Le nouveau mot de passe doit contenir au moins un caractère spécial'
-        };
-      }
-
-      const hashedPassword = await bcrypt.hash(nouveauPassword, bcryptConfig.saltRounds);
-      utilisateur.mot_de_passe = hashedPassword;
-      await utilisateur.save();
-      return {
-        success: true,
-        message: 'Mot de passe modifié avec succès'
-      };
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  //modifier le profil
-  static async modifierProfil(id, nom, prenom, email, telephone, adresse) {
-    try {
-      const utilisateur = await Utilisateur.findByPk(id);
-
-      if (!utilisateur) {
-        return {
-          success: false,
-          message: "Utilisateur non trouvé"
-        };
-      }
-
-      // NOM / PRENOM (safe update)
-      if (nom !== undefined) utilisateur.nom = nom;
-      if (prenom !== undefined) utilisateur.prenom = prenom;
-
-      // EMAIL (avec exclusion utilisateur courant)
-      if (email && email !== utilisateur.email) {
-        const emailClean = email.trim().toLowerCase();
-
-        const emailExist = await Utilisateur.findOne({
-          where: {
-            email: emailClean,
-            id: { [Op.ne]: id }
-          }
-        });
-
-        if (emailExist) {
-          return {
-            success: false,
-            message: "Cet email est déjà associé à un autre compte"
-          };
-        }
-
-        utilisateur.email = emailClean;
-      }
-
-      // TELEPHONE (avec exclusion utilisateur courant)
-      if (telephone && telephone !== utilisateur.telephone) {
-        const telExist = await Utilisateur.findOne({
-          where: {
-            telephone,
-            id: { [Op.ne]: id }
-          }
-        });
-
-        if (telExist) {
-          return {
-            success: false,
-            message: "Ce numéro est déjà associé à un autre compte"
-          };
-        }
-
-        utilisateur.telephone = telephone;
-      }
-
-      // ADRESSE
-      if (adresse !== undefined) {
-        utilisateur.adresse = adresse;
-      }
-
-      await utilisateur.save();
-
-      return {
-        success: true,
-        message: "Profil modifié avec succès",
-        utilisateur
-      };
-
-    } catch (error) {
-      throw error;
-    }
-  }
-
   //oublie le password
   static async oublierPassword(email) {
     try {
@@ -347,8 +192,12 @@ class AuthService {
 
       return { success: true, message: 'Si un compte existe avec cet email, un code de réinitialisation a été envoyé.' };
     } catch (error) {
+      // Ne jamais exposer l'erreur brute du provider mail (ex: "API key is
+      // invalid" quand RESEND_API_KEY est mal configurée côté serveur) —
+      // le client ne doit voir qu'un message générique, l'erreur réelle
+      // reste dans les logs pour le diagnostic.
       logger.error('Erreur oublierPassword', { error: error.message, stack: error.stack });
-      throw error;
+      throw new Error("Impossible d'envoyer l'email pour le moment. Veuillez réessayer plus tard.");
     }
   }
 

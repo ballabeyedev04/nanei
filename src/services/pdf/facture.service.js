@@ -1,5 +1,4 @@
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+const htmlToPdf = require('../../utils/htmlToPdf');
 const { factureHtml } = require('../../pdf/facture.template');
 const Paiement = require('../../models/paiement.model');
 const { Colis, Utilisateur } = require('../../models');
@@ -67,34 +66,14 @@ class FactureService {
 
     const html = factureHtml(data);
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        ...chromium.args,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-      executablePath: await chromium.executablePath(),
+    const buffer = await htmlToPdf(html, {
+      format: 'A4',
+      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      waitForFonts: true,
     });
 
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 20000 });
-      await page.evaluate(() => document.fonts.ready);
-
-      const buffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '0', right: '0', bottom: '0', left: '0' },
-      });
-
-      const filename = `facture-${data.factureNumero}-${data.colisReference}.pdf`;
-      return { buffer, filename };
-    } finally {
-      await browser.close();
-    }
+    const filename = `facture-${data.factureNumero}-${data.colisReference}.pdf`;
+    return { buffer, filename };
   }
 }
 

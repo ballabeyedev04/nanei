@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const servicePriceController = require('../../controllers/admin/servicePrice.controller');
 const authMiddleware = require('../../middlewares/auth.middleware');
+const isAdmin = require('../../middlewares/isAdmin.middlewares');
 const auditLog = require('../../middlewares/auditlog.middleware');
 
 // Toutes les routes sont protégées - admin seulement
 router.use(authMiddleware);
+router.use(isAdmin);
 
 router.get('/', servicePriceController.getServicePrices);
 router.get('/:id', servicePriceController.getServicePriceById);
