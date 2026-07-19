@@ -50,7 +50,10 @@ exports.genererEtiquetteClient = async (req, res) => {
       recepteurPays: colis.destination || '',
       typeTransport: colis.type_colis || 'aerien',
       poids: colis.poids,
-      createdAt: colis.created_at,
+      // Modèle en underscored: true — l'attribut JS reste createdAt (camelCase),
+      // seul le nom de colonne SQL est created_at. `colis.created_at` valait
+      // toujours undefined, d'où "Créé le —" systématique sur l'étiquette.
+      createdAt: colis.createdAt,
     };
 
     const buffer = await genererEtiquette(colisData);

@@ -105,36 +105,34 @@ function etiquetteHtml(data) {
   /* Header */
   .header {
     background: #FF7A00;
-    border-radius: 6px;
-    padding: 8px 12px;
+    border-radius: 8px;
+    padding: 14px 12px;
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
   }
   .header-logo {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    object-fit: cover;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    object-fit: contain;
     flex-shrink: 0;
     background: white;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 900;
-    font-size: 16px;
+    font-size: 18px;
     color: #FF7A00;
+    padding: 4px;
+    margin-right: 10px;
   }
   .header-title {
-    font-size: 13px;
-    font-weight: 900;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 26px;
+    font-weight: 700;
     color: white;
-    letter-spacing: 0.5px;
-  }
-  .header-sub {
-    font-size: 9px;
-    color: rgba(255,255,255,0.75);
-    margin-top: 1px;
+    letter-spacing: 1px;
   }
 
   /* Référence */
@@ -244,10 +242,7 @@ function etiquetteHtml(data) {
       ? `<img src="${LOGO_B64}" class="header-logo" alt="Nanei"/>`
       : `<div class="header-logo">N</div>`
     }
-    <div>
-      <div class="header-title">Nanei · FrancoMaliShip</div>
-      <div class="header-sub">Service d'envoi international de colis</div>
-    </div>
+    <div class="header-title">Nanei</div>
   </div>
 
   <!-- Référence -->
