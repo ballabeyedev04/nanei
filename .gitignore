@@ -22,6 +22,10 @@ uploads/
 tmp/
 temp/
 
+# Sauvegardes PostgreSQL locales (backup-postgres.sh) — uploadées vers
+# Google Drive, jamais versionnées
+backups/
+
 # OS
 .DS_Store
 Thumbs.db
