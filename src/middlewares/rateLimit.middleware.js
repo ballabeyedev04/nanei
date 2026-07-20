@@ -7,6 +7,7 @@ const {
   mutationRateLimitConfig,
   adminRateLimitConfig,
   otpEmailRateLimitConfig,
+  suiviPublicRateLimitConfig,
   jwtConfig,
 } = require('../config/security');
 
@@ -54,10 +55,14 @@ const authenticatedRateLimit = rateLimit({
   },
 });
 
+// Suivi public d'un colis — 30 req / 15 min par IP (anti énumération de références)
+const suiviPublicRateLimit = rateLimit(suiviPublicRateLimitConfig);
+
 module.exports = {
   authRateLimit,
   authenticatedRateLimit,
   mutationRateLimit,
   adminRateLimit,
   otpEmailRateLimit,
+  suiviPublicRateLimit,
 };

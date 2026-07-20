@@ -3,6 +3,7 @@ const logger = require('../../config/logger');
 const Utilisateur = require('../../models/utilisateur.model');
 const Country = require('../../models/country.model');
 const { genererEtiquette } = require('../../pdf/etiquette.template');
+const { genererEtiquetteZPL } = require('../../pdf/etiquette.zpl');
 
 /**
  * GET /nanei/etiquettes/:colisId
@@ -58,6 +59,16 @@ exports.genererEtiquetteClient = async (req, res) => {
       // toujours undefined, d'où "Créé le —" systématique sur l'étiquette.
       createdAt: colis.createdAt,
     };
+
+    // ?format=zpl — flux ZPL brut pour imprimante thermique (100x150mm),
+    // à défaut le PDF classique (visualisation écran / impression bureau).
+    if (req.query.format === 'zpl') {
+      const zpl = genererEtiquetteZPL(colisData);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="etiquette-${colis.reference}.zpl"`);
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.end(zpl);
+    }
 
     const buffer = await genererEtiquette(colisData);
     const filename = `etiquette-${colis.reference}.pdf`;

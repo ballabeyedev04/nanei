@@ -118,6 +118,91 @@ class EnvoieColisService {
     }
   }
 
+  // 🔹 Créer plusieurs colis en une seule commande groupée (regroupement) —
+  // même logique que envoieColis() rejouée pour chaque élément du lot, dans
+  // UNE SEULE transaction (tout ou rien) et avec un lot_id commun généré une
+  // fois pour toute la commande.
+  static async envoieColisLot({ items, utilisateurConnecte }) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return { success: false, message: 'Aucun colis fourni' };
+    }
+    if (items.length > 20) {
+      return { success: false, message: 'Un lot ne peut pas contenir plus de 20 colis' };
+    }
+
+    const transaction = await sequelize.transaction();
+    const lotId = crypto.randomUUID();
+
+    try {
+      const colisCrees = [];
+
+      for (const item of items) {
+        const { recepteurId, poids, prix, destination, description, type_colis } = item;
+
+        if (!recepteurId || !poids || !prix || !destination) {
+          throw new Error('Un des colis du lot est incomplet (destinataire, poids, prix ou destination manquant)');
+        }
+
+        const recepteur = await Utilisateur.findByPk(recepteurId);
+        if (!recepteur) {
+          throw new Error('Récepteur non trouvé pour un des colis du lot');
+        }
+
+        const reference = await this.genererReferenceColis();
+
+        const colis = await Colis.create({
+          reference,
+          recepteurId,
+          expediteurId: utilisateurConnecte.id,
+          poids,
+          prix,
+          destination,
+          description: description || null,
+          type_colis,
+          lot_id: lotId,
+        }, { transaction });
+
+        await Notifications.create({
+          expediteurId: utilisateurConnecte.id,
+          recepteurId,
+          colisId: colis.id,
+        }, { transaction });
+
+        await Paiement.create({
+          colisId:   colis.id,
+          payeurId:  utilisateurConnecte.id,
+          prixTotal: prix,
+          statut:    'en_attente',
+        }, { transaction });
+
+        colisCrees.push({ colis, recepteur });
+      }
+
+      await transaction.commit();
+
+      // SMS de notification par colis (non-bloquant, un envoi par destinataire)
+      for (const { colis, recepteur } of colisCrees) {
+        if (recepteur.telephone) {
+          const messageText = `Bonjour ${recepteur.prenom} ${recepteur.nom}, vous allez recevoir le colis reference : ${colis.reference} chez Franco Mali Ship. Merci de votre confiance !`;
+          sendSMS(recepteur.telephone, messageText)
+            .then(res => logger.debug('SMS envoyé (lot)', { success: res?.success }))
+            .catch(err => logger.warn('Erreur SMS notification (lot)', { error: err.message }));
+        }
+      }
+
+      return {
+        success: true,
+        message: `${colisCrees.length} colis créés avec succès`,
+        data: { lotId, colis: colisCrees.map(c => c.colis) },
+      };
+
+    } catch (error) {
+      await transaction.rollback();
+      logger.error('Erreur envoieColisLot', { error: error.message, stack: error.stack });
+      return { success: false, message: error.message };
+    }
+  }
+
   // 🔹 Rechercher un client par nom, prénom ou email
   static async rechercherClient(searchTerm) {
     try {
@@ -221,6 +306,34 @@ class EnvoieColisService {
         success: false,
         message: error.message
       };
+    }
+  }
+
+  // 🔹 Rechercher un colis par référence (scan QR code de l'étiquette) —
+  // uniquement si l'utilisateur connecté est l'expéditeur ou le
+  // destinataire du colis, jamais un tiers.
+  static async rechercherColisParReference(reference, utilisateurId) {
+    try {
+      const colis = await Colis.findOne({
+        where: { reference },
+        include: [
+          { model: Utilisateur, as: 'expediteur', attributes: ['id', 'nom', 'prenom', 'email'] },
+          { model: Utilisateur, as: 'recepteur',  attributes: ['id', 'nom', 'prenom', 'email'] },
+        ],
+      });
+
+      if (!colis) {
+        return { success: false, message: 'Colis introuvable' };
+      }
+
+      if (colis.expediteurId !== utilisateurId && colis.recepteurId !== utilisateurId) {
+        return { success: false, message: 'Ce colis ne vous appartient pas' };
+      }
+
+      return { success: true, data: colis };
+    } catch (error) {
+      logger.error('Erreur rechercherColisParReference', { error: error.message, stack: error.stack });
+      return { success: false, message: error.message };
     }
   }
 

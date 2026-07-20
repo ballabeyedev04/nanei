@@ -43,6 +43,42 @@ exports.envoieColisController = async (req, res) => {
   }
 };
 
+// 🔹 Envoyer plusieurs colis en une seule commande groupée (regroupement)
+exports.envoieColisLotController = async (req, res) => {
+  const { colis } = req.body;
+  const utilisateurConnecte = req.user;
+
+  try {
+    const result = await EnvoieColisService.envoieColisLot({
+      items: colis,
+      utilisateurConnecte,
+    });
+
+    if (!result.success) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    logger.info('Lot de colis créé', {
+      lot_id: result.data?.lotId,
+      nb_colis: result.data?.colis?.length,
+      user_id: utilisateurConnecte?.id,
+    });
+
+    return res.status(201).json({
+      message: result.message,
+      lotId: result.data.lotId,
+      colis: result.data.colis,
+    });
+
+  } catch (err) {
+    logger.error('Erreur dans envoieColisLotController', { error: err.message, stack: err.stack, user_id: req.user?.id });
+    return res.status(500).json({
+      message: "Erreur serveur lors de l'envoi du lot de colis",
+      erreur: err.message
+    });
+  }
+};
+
 // Nouveau contrôleur : recherche de client
 exports.rechercherClientController = async (req, res) => {
   const searchTerm = req.query.q; 
@@ -107,6 +143,29 @@ exports.getColisRecusController = async (req, res) => {
     logger.error('Erreur dans getColisRecusController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de la récupération des colis reçus',
+      erreur: err.message
+    });
+  }
+};
+
+// 🔹 Rechercher un colis par référence (scan QR code) — expéditeur ou destinataire uniquement
+exports.rechercherColisParReferenceController = async (req, res) => {
+  try {
+    const { reference } = req.params;
+    const utilisateurId = req.user.id;
+
+    const result = await EnvoieColisService.rechercherColisParReference(reference, utilisateurId);
+
+    if (!result.success) {
+      const status = result.message === 'Colis introuvable' ? 404 : 403;
+      return res.status(status).json({ message: result.message });
+    }
+
+    return res.status(200).json({ data: result.data });
+  } catch (err) {
+    logger.error('Erreur dans rechercherColisParReferenceController', { error: err.message, stack: err.stack, user_id: req.user?.id });
+    return res.status(500).json({
+      message: 'Erreur serveur lors de la recherche du colis',
       erreur: err.message
     });
   }

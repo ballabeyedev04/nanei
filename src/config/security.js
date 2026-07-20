@@ -90,6 +90,19 @@ const otpEmailRateLimitConfig = {
   message: { success: false, message: 'Trop de tentatives pour cet email. Réessayez dans 15 minutes.' }
 };
 
+// Suivi public d'un colis (scan QR / lien partagé, sans authentification) —
+// 30 req / 15 min par IP. Les références sont générées aléatoirement (non
+// devinables), mais sans limite quelqu'un pourrait scripter une énumération
+// massive de références pour glaner des infos sur des colis qui ne sont pas
+// les siens (nom, téléphone masqué, statut).
+const suiviPublicRateLimitConfig = {
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Trop de requêtes. Veuillez réessayer dans quelques minutes.' }
+};
+
 /**
  * CORS sécurisé
  */
@@ -134,6 +147,7 @@ module.exports = {
   mutationRateLimitConfig,
   adminRateLimitConfig,
   otpEmailRateLimitConfig,
+  suiviPublicRateLimitConfig,
   corsConfig,
   cookieConfig,
   uploadConfig,

@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const QRCode = require('qrcode');
 const htmlToPdf = require('../utils/htmlToPdf');
+
+const BASE_URL = process.env.BACKEND_URL || 'http://localhost:3000';
 
 const LOGO_B64 = (() => {
   try {
@@ -12,37 +15,30 @@ const LOGO_B64 = (() => {
 })();
 
 /**
- * Génère un SVG de code-barres visuel (non scannable) à partir d'une chaîne.
- * Chaque caractère → barre de largeur (charCode % 4 + 1), alternant noir/blanc.
+ * URL publique de suivi encodée dans le QR code — scannable par n'importe
+ * quel lecteur QR (pas seulement l'app Nanei), ouvre directement la page de
+ * suivi du colis dans un navigateur. L'app mobile Nanei reconnaît aussi ce
+ * format et extrait la référence pour ouvrir la fiche colis en interne
+ * (voir features/colis/.../scan_colis_page.dart côté mobile).
  */
-function genererBarcode(reference) {
-  const barWidth = 2;
-  const height = 60;
-  let x = 0;
-  let bars = '';
-  let noir = true;
-
-  for (let i = 0; i < reference.length; i++) {
-    const w = (reference.charCodeAt(i) % 4 + 1) * barWidth;
-    if (noir) {
-      bars += `<rect x="${x}" y="0" width="${w}" height="${height}" fill="#111"/>`;
-    }
-    x += w;
-    noir = !noir;
-  }
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${x}" height="${height}" viewBox="0 0 ${x} ${height}">${bars}</svg>`;
+function urlSuiviPublic(reference) {
+  return `${BASE_URL}/nanei/suivi/${reference}`;
 }
 
 /**
- * Encode le SVG barcode en data URI pour embedding dans HTML.
+ * Génère un vrai QR code scannable (remplace l'ancien "code-barres" SVG
+ * dessiné à partir des codes ASCII de la référence, qui n'encodait aucune
+ * donnée et n'était lisible par aucun scanner).
  */
-function barcodeDataUri(reference) {
-  const svg = genererBarcode(reference);
-  return 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
+async function qrCodeDataUri(reference) {
+  return QRCode.toDataURL(urlSuiviPublic(reference), {
+    margin: 1,
+    width: 240,
+    color: { dark: '#111111', light: '#FFFFFFFF' },
+  });
 }
 
-function etiquetteHtml(data) {
+async function etiquetteHtml(data) {
   const {
     reference,
     expediteurNom,
@@ -74,7 +70,7 @@ function etiquetteHtml(data) {
     return c.slice(0, 2) + '****' + c.slice(-2);
   };
 
-  const barcodeSrc = barcodeDataUri(reference);
+  const qrSrc = await qrCodeDataUri(reference);
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -157,13 +153,13 @@ function etiquetteHtml(data) {
     word-break: break-all;
   }
 
-  /* Barcode */
+  /* QR code */
   .barcode-block {
     text-align: center;
   }
   .barcode-block img {
-    max-width: 100%;
-    height: 50px;
+    width: 68px;
+    height: 68px;
   }
   .barcode-text {
     font-size: 8px;
@@ -254,7 +250,7 @@ function etiquetteHtml(data) {
 
   <!-- Barcode visuel -->
   <div class="barcode-block">
-    <img src="${barcodeSrc}" alt="barcode"/>
+    <img src="${qrSrc}" alt="QR code de suivi"/>
     <div class="barcode-text">${reference}</div>
   </div>
 
@@ -298,7 +294,7 @@ function etiquetteHtml(data) {
  * @returns {Promise<Buffer>} Buffer PDF
  */
 async function genererEtiquette(colisData) {
-  const html = etiquetteHtml(colisData);
+  const html = await etiquetteHtml(colisData);
 
   return htmlToPdf(html, {
     format: 'A6',

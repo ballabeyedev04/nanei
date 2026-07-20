@@ -6,12 +6,18 @@ const authMiddleware = require('../../middlewares/auth.middleware');
 // Route pour envoyer un colis (POST)
 router.post('/envoie-colis', authMiddleware, envoieColisController.envoieColisController);
 
+// Route pour envoyer plusieurs colis en une seule commande groupée (regroupement)
+router.post('/envoie-colis-lot', authMiddleware, envoieColisController.envoieColisLotController);
+
 // Pays actifs + pricing (pour le mobile)
 router.get('/countries', authMiddleware, envoieColisController.getCountriesController);
 router.get('/pricing/:countryId', authMiddleware, envoieColisController.getPricingByCountryController);
 
 // Route pour rechercher un client par nom, prénom ou email (GET)
 router.get('/rechercher-client', authMiddleware, envoieColisController.rechercherClientController);
+
+// 🔹 Rechercher un colis par référence (scan QR code de l'étiquette)
+router.get('/colis-recherche/:reference', authMiddleware, envoieColisController.rechercherColisParReferenceController);
 
 // 🔹 Récupérer tous les colis envoyés par l'utilisateur
 router.get('/colis-envoyes', authMiddleware, envoieColisController.getColisEnvoyesController);

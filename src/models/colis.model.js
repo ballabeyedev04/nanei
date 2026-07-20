@@ -56,11 +56,19 @@ const Colis = sequelize.define('Colis', {
 
   statut: {
     type: DataTypes.ENUM(
-      'en_attente', 
-      'recupere', 
+      'en_attente',
+      'recupere',
       'livre'
     ),
     defaultValue: 'en_attente',
+  },
+
+  // Regroupement de colis — plusieurs colis envoyés en une seule commande
+  // partagent le même lot_id (généré une fois par soumission groupée, voir
+  // EnvoieColisService.envoieColisLot). Null pour un envoi simple (non groupé).
+  lot_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
   },
 
 }, {
