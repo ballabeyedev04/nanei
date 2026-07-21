@@ -1,4 +1,5 @@
 const PricingCalculatorService = require('../services/pricingCalculator.service');
+const TauxChangeService = require('../services/tauxChange.service');
 const logger = require('../config/logger');
 
 exports.calculatePrice = async (req, res) => {
@@ -34,6 +35,25 @@ exports.calculatePrice = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur lors du calcul du prix',
+      error: error.message,
+    });
+  }
+};
+
+// Route publique consommée par le mobile pour l'affichage double devise
+// (EUR affiché partout + FCFA calculé côté client avec ce taux).
+exports.getTauxChange = async (req, res) => {
+  try {
+    const valeur = await TauxChangeService.getTauxActif();
+    return res.status(200).json({
+      success: true,
+      data: { deviseSource: 'EUR', deviseCible: 'FCFA', valeur },
+    });
+  } catch (error) {
+    logger.error('Erreur getTauxChange', { error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur',
       error: error.message,
     });
   }
