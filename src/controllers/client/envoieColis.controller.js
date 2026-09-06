@@ -8,12 +8,13 @@ const ServiceRateService = require('../../services/serviceRate.service');
 
 // Contrôleur existant (envoi de colis)
 exports.envoieColisController = async (req, res) => {
-  const { recepteurId, poids, prix, destination, description, type_colis } = req.body;
+  const { recepteurId, destinataireManuel, poids, prix, destination, description, type_colis } = req.body;
   const utilisateurConnecte = req.user;
 
   try {
     const result = await EnvoieColisService.envoieColis({
       recepteurId,
+      destinataireManuel,
       poids,
       prix,
       utilisateurConnecte,

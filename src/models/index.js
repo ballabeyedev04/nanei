@@ -12,6 +12,7 @@ const PreuveLivraison = require('./preuvelivraison.model');
 const Avis = require('./avis.model');
 const AuditLog = require('./auditlog.model');
 const ColisHistorique = require('./colisHistorique.model');
+const RefreshToken = require('./refreshToken.model');
 
 // 🔹 Associations Colis
 Utilisateur.hasMany(Colis, { foreignKey: 'expediteurId', as: 'colisEnvoyes' });
@@ -69,4 +70,5 @@ module.exports = {
   Avis,
   AuditLog,
   ColisHistorique,
+  RefreshToken,
 };

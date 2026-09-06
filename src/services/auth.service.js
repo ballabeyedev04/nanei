@@ -1,6 +1,8 @@
 const Utilisateur = require('../models/utilisateur.model');
+const RefreshToken = require('../models/refreshToken.model');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { Op } = require('sequelize');
 const { jwtConfig, bcryptConfig } = require('../config/security');
 const sequelize = require('../config/db');
 const crypto = require("crypto");
@@ -8,6 +10,29 @@ const logger = require('../config/logger');
 const { sendOtpEmail } = require('./resend.service');
 
 class AuthService {
+
+  // 🔹 Génère un refresh token (JWT longue durée) et enregistre son hash
+  // SHA-256 en base (table refresh_tokens). Le token brut n'est jamais
+  // stocké — une fuite DB ne compromet donc pas les sessions actives.
+  static async genererRefreshToken(utilisateur) {
+    const refreshToken = jwt.sign(
+      { id: utilisateur.id, role: utilisateur.role },
+      jwtConfig.refreshSecret,
+      { expiresIn: jwtConfig.refreshExpiresIn }
+    );
+
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const { exp } = jwt.decode(refreshToken);
+
+    await RefreshToken.create({
+      tokenHash,
+      utilisateurId: utilisateur.id,
+      expiresAt: new Date(exp * 1000),
+      revoked: false,
+    });
+
+    return refreshToken;
+  }
 
   // -------------------- INSCRIPTION --------------------
   static async register({
@@ -52,6 +77,73 @@ class AuthService {
       }
 
       const emailClean = email.trim().toLowerCase();
+      // Normaliser le téléphone : si falsy, le passer comme null pour éviter les valeurs undefined
+      const tel = telephone || null;
+
+      const hashedPassword = await bcrypt.hash(
+        mot_de_passe,
+        bcryptConfig.saltRounds
+      );
+
+      // 🔹 Revendication d'un compte "destinataire" créé automatiquement lors
+      // d'un envoi de colis (statut 'inactif'). Si un tel compte correspond à
+      // l'email OU au téléphone fourni ici, on le complète et on l'active au
+      // lieu d'en créer un nouveau : la personne retrouve ainsi les colis déjà
+      // reçus sous ce compte.
+      const compteFantome = await Utilisateur.findOne({
+        where: {
+          statut: 'inactif',
+          role: 'Particulier',
+          [Op.or]: [
+            { email: emailClean },
+            ...(tel ? [{ telephone: tel }] : []),
+          ],
+        },
+        transaction: t,
+      });
+
+      if (compteFantome) {
+        // Vérifier qu'un autre compte ACTIF ne possède pas déjà cet email / ce
+        // téléphone (collision impossible à résoudre par une revendication).
+        const collision = await Utilisateur.findOne({
+          where: {
+            id: { [Op.ne]: compteFantome.id },
+            [Op.or]: [
+              { email: emailClean },
+              ...(tel ? [{ telephone: tel }] : []),
+            ],
+          },
+          transaction: t,
+        });
+        if (collision) {
+          await t.rollback();
+          return {
+            success: false,
+            message: collision.email === emailClean
+              ? "Cet email est déjà utilisé"
+              : "Ce numéro de téléphone est déjà utilisé",
+          };
+        }
+
+        compteFantome.nom = nom;
+        compteFantome.prenom = prenom;
+        compteFantome.email = emailClean;
+        compteFantome.mot_de_passe = hashedPassword;
+        compteFantome.adresse = adresse;
+        compteFantome.telephone = tel;
+        compteFantome.role = role;
+        compteFantome.statut = 'actif';
+        compteFantome.passwordChangedAt = new Date();
+        await compteFantome.save({ transaction: t });
+
+        await t.commit();
+        logger.info('Compte destinataire revendiqué à l\'inscription', { user_id: compteFantome.id });
+        return {
+          success: true,
+          message: "Inscription réussie",
+          utilisateur: compteFantome,
+        };
+      }
 
       const exist = await Utilisateur.findOne({
         where: { email: emailClean },
@@ -66,8 +158,6 @@ class AuthService {
         };
       }
 
-      // Normaliser le téléphone : si falsy, le passer comme null pour éviter les valeurs undefined
-      const tel = telephone || null;
       const telExist = await Utilisateur.findOne({
         where: { telephone: tel },
         transaction: t
@@ -81,11 +171,6 @@ class AuthService {
         };
       }
 
-
-      const hashedPassword = await bcrypt.hash(
-        mot_de_passe,
-        bcryptConfig.saltRounds
-      );
       const utilisateur = await Utilisateur.create({
         nom,
         prenom,
@@ -149,7 +234,9 @@ class AuthService {
       role: utilisateur.role
     }, jwtConfig.secret, { expiresIn: jwtConfig.expiresIn });
 
-    return { success: true, token, utilisateur };
+    const refreshToken = await this.genererRefreshToken(utilisateur);
+
+    return { success: true, token, refreshToken, utilisateur };
   }
 
   //oublie le password
@@ -183,12 +270,24 @@ class AuthService {
         lockedUntil: null
       });
 
-      // Envoyer par email via Resend
-      await sendOtpEmail({
-        to: utilisateur.email,
-        nom: `${utilisateur.prenom} ${utilisateur.nom}`,
-        otp: otpCode,
-      });
+      // Envoyer par email via Resend.
+      //
+      // Isolé dans son propre try : le bloc englobant transforme TOUTE erreur
+      // en « Impossible d'envoyer l'email », y compris une panne de base au
+      // moment d'écrire l'OTP. Les deux causes se confondaient donc dans les
+      // logs, alors qu'elles n'appellent pas du tout la même correction.
+      try {
+        await sendOtpEmail({
+          to: utilisateur.email,
+          nom: `${utilisateur.prenom} ${utilisateur.nom}`,
+          otp: otpCode,
+        });
+      } catch (erreurMail) {
+        logger.error('Envoi OTP impossible — vérifier RESEND_API_KEY et le domaine de MAIL_FROM', {
+          error: erreurMail.message,
+        });
+        throw erreurMail;
+      }
 
       return { success: true, message: 'Si un compte existe avec cet email, un code de réinitialisation a été envoyé.' };
     } catch (error) {

@@ -1,12 +1,99 @@
-const { Colis, Utilisateur, Notifications } = require('../../models');
+const { Colis, Utilisateur, Notifications, ContactFavori } = require('../../models');
 const Paiement = require('../../models/paiement.model');
 const sequelize = require('../../config/db');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
+const bcrypt = require('bcrypt');
+const { bcryptConfig } = require('../../config/security');
 const logger = require('../../config/logger');
 const { sendSMS } = require('../twilio.service');
 
 class EnvoieColisService {
+
+  // 🔹 Résoudre un destinataire saisi manuellement par l'expéditeur (le
+  // destinataire n'a pas encore de compte). On réutilise un compte existant
+  // s'il correspond (dédup par email réel puis par téléphone), sinon on crée
+  // un compte "léger" (statut inactif) qui sera revendiqué automatiquement le
+  // jour où la personne s'inscrit (voir AuthService.register).
+  //
+  // Retourne l'instance Utilisateur à utiliser comme récepteur.
+  static async resoudreOuCreerRecepteur({ destinataireManuel, transaction }) {
+    const prenom = (destinataireManuel?.prenom || '').trim();
+    const nom = (destinataireManuel?.nom || '').trim();
+    const telephone = (destinataireManuel?.telephone || '').trim();
+    const emailSaisi = (destinataireManuel?.email || '').trim().toLowerCase();
+    const ville = (destinataireManuel?.ville || '').trim();
+
+    if (!prenom || !nom) {
+      throw new Error('Le prénom et le nom du destinataire sont obligatoires');
+    }
+    if (!telephone) {
+      throw new Error('Le téléphone du destinataire est obligatoire');
+    }
+
+    // 1) Dédup par email réel (si fourni)
+    let recepteur = null;
+    if (emailSaisi) {
+      recepteur = await Utilisateur.findOne({ where: { email: emailSaisi }, transaction });
+    }
+
+    // 2) Dédup par téléphone
+    if (!recepteur) {
+      recepteur = await Utilisateur.findOne({ where: { telephone }, transaction });
+    }
+
+    if (recepteur) {
+      if (recepteur.role === 'Admin') {
+        throw new Error("Ce contact correspond à un compte non autorisé comme destinataire");
+      }
+      return recepteur;
+    }
+
+    // 3) Créer un compte destinataire léger
+    const motDePasse = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), bcryptConfig.saltRounds);
+    const email = emailSaisi || `no-email-${crypto.randomUUID()}@nanei.local`;
+
+    recepteur = await Utilisateur.create({
+      nom,
+      prenom,
+      email,
+      mot_de_passe: motDePasse,
+      adresse: ville || '—',
+      telephone,
+      role: 'Particulier',
+      statut: 'inactif',
+    }, { transaction });
+
+    return recepteur;
+  }
+
+  // 🔹 Enregistrer / mettre à jour le destinataire dans les contacts favoris
+  // de l'expéditeur (dédup sur le téléphone) pour réutilisation ultérieure.
+  // Non bloquant : une erreur ici ne doit pas faire échouer l'envoi.
+  static async enregistrerContactFavori({ expediteurId, destinataireManuel, transaction }) {
+    try {
+      const telephone = (destinataireManuel?.telephone || '').trim();
+      if (!telephone) return;
+
+      const existant = await ContactFavori.findOne({
+        where: { utilisateur_id: expediteurId, telephone },
+        transaction,
+      });
+      if (existant) return;
+
+      await ContactFavori.create({
+        utilisateur_id: expediteurId,
+        nom: (destinataireManuel.nom || '').trim(),
+        prenom: (destinataireManuel.prenom || '').trim() || null,
+        email: (destinataireManuel.email || '').trim().toLowerCase() || null,
+        telephone,
+        ville: (destinataireManuel.ville || '').trim() || null,
+        pays_id: destinataireManuel.paysId || null,
+      }, { transaction });
+    } catch (error) {
+      logger.warn('Contact favori non enregistré', { error: error.message });
+    }
+  }
 
   // 🔹 Générer référence
   static async genererReferenceColis() {
@@ -35,6 +122,7 @@ class EnvoieColisService {
   // 🔹 Créer colis
   static async envoieColis({
     recepteurId,
+    destinataireManuel,
     poids,
     prix,
     utilisateurConnecte,
@@ -46,11 +134,19 @@ class EnvoieColisService {
     const transaction = await sequelize.transaction();
 
     try {
-      // ✅ vérifier recepteur
-      const recepteur = await Utilisateur.findByPk(recepteurId);
-      if (!recepteur) {
-        throw new Error('Recepteur non trouvé');
+      // ✅ Résoudre le récepteur : soit un compte existant sélectionné dans la
+      // recherche (recepteurId), soit un destinataire saisi manuellement
+      // (destinataireManuel) — dans ce cas on réutilise/crée un compte léger.
+      let recepteur;
+      if (destinataireManuel) {
+        recepteur = await this.resoudreOuCreerRecepteur({ destinataireManuel, transaction });
+      } else {
+        recepteur = await Utilisateur.findByPk(recepteurId, { transaction });
+        if (!recepteur) {
+          throw new Error('Recepteur non trouvé');
+        }
       }
+      const recepteurIdFinal = recepteur.id;
 
       // ✅ générer référence
       const reference = await this.genererReferenceColis();
@@ -58,7 +154,7 @@ class EnvoieColisService {
       // ✅ créer colis
       const colis = await Colis.create({
         reference,
-        recepteurId,
+        recepteurId: recepteurIdFinal,
         expediteurId: utilisateurConnecte.id,
         poids,
         prix,
@@ -69,7 +165,7 @@ class EnvoieColisService {
 
       await Notifications.create({
         expediteurId: utilisateurConnecte.id,
-        recepteurId: recepteurId,
+        recepteurId: recepteurIdFinal,
         colisId: colis.id
       }, { transaction });
 
@@ -80,6 +176,15 @@ class EnvoieColisService {
         prixTotal: prix,
         statut:    'en_attente',
       }, { transaction });
+
+      // Mémoriser le destinataire manuel dans les contacts favoris de l'expéditeur
+      if (destinataireManuel) {
+        await this.enregistrerContactFavori({
+          expediteurId: utilisateurConnecte.id,
+          destinataireManuel,
+          transaction,
+        });
+      }
 
       await transaction.commit();
 
@@ -137,22 +242,28 @@ class EnvoieColisService {
       const colisCrees = [];
 
       for (const item of items) {
-        const { recepteurId, poids, prix, destination, description, type_colis } = item;
+        const { recepteurId, destinataireManuel, poids, prix, destination, description, type_colis } = item;
 
-        if (!recepteurId || !poids || !prix || !destination) {
+        if ((!recepteurId && !destinataireManuel) || !poids || !prix || !destination) {
           throw new Error('Un des colis du lot est incomplet (destinataire, poids, prix ou destination manquant)');
         }
 
-        const recepteur = await Utilisateur.findByPk(recepteurId);
-        if (!recepteur) {
-          throw new Error('Récepteur non trouvé pour un des colis du lot');
+        let recepteur;
+        if (destinataireManuel) {
+          recepteur = await this.resoudreOuCreerRecepteur({ destinataireManuel, transaction });
+        } else {
+          recepteur = await Utilisateur.findByPk(recepteurId, { transaction });
+          if (!recepteur) {
+            throw new Error('Récepteur non trouvé pour un des colis du lot');
+          }
         }
+        const recepteurIdFinal = recepteur.id;
 
         const reference = await this.genererReferenceColis();
 
         const colis = await Colis.create({
           reference,
-          recepteurId,
+          recepteurId: recepteurIdFinal,
           expediteurId: utilisateurConnecte.id,
           poids,
           prix,
@@ -164,7 +275,7 @@ class EnvoieColisService {
 
         await Notifications.create({
           expediteurId: utilisateurConnecte.id,
-          recepteurId,
+          recepteurId: recepteurIdFinal,
           colisId: colis.id,
         }, { transaction });
 
@@ -174,6 +285,14 @@ class EnvoieColisService {
           prixTotal: prix,
           statut:    'en_attente',
         }, { transaction });
+
+        if (destinataireManuel) {
+          await this.enregistrerContactFavori({
+            expediteurId: utilisateurConnecte.id,
+            destinataireManuel,
+            transaction,
+          });
+        }
 
         colisCrees.push({ colis, recepteur });
       }
@@ -220,13 +339,17 @@ class EnvoieColisService {
           // sélectionnables comme destinataire. Ne jamais exposer les
           // comptes Admin (email/identité) à la recherche client.
           role: 'Particulier',
+          // Exclure les comptes "légers" créés automatiquement pour un
+          // destinataire sans compte : ils ne sont pas censés être
+          // découvrables par d'autres expéditeurs.
+          statut: 'actif',
           [Op.or]: [
             { nom: { [Op.like]: `%${searchTerm}%` } },
             { prenom: { [Op.like]: `%${searchTerm}%` } },
             { email: { [Op.like]: `%${searchTerm}%` } }
           ]
         },
-        attributes: ['id', 'nom', 'prenom', 'email'], // on limite aux champs utiles
+        attributes: ['id', 'nom', 'prenom', 'email', 'telephone'], // on limite aux champs utiles
         limit: 20 // limite raisonnable
       });
 
@@ -252,12 +375,12 @@ class EnvoieColisService {
           {
             model: Utilisateur,
             as: 'recepteur',
-            attributes: ['id', 'nom', 'prenom', 'email']
+            attributes: ['id', 'nom', 'prenom', 'email', 'telephone']
           },
           {
             model: Utilisateur,
             as: 'expediteur',
-            attributes: ['id', 'nom', 'prenom', 'email']
+            attributes: ['id', 'nom', 'prenom', 'email', 'telephone']
           },
         ],
         order: [['created_at', 'DESC']]
@@ -285,12 +408,12 @@ class EnvoieColisService {
           {
             model: Utilisateur,
             as: 'expediteur',
-            attributes: ['id', 'nom', 'prenom', 'email']
+            attributes: ['id', 'nom', 'prenom', 'email', 'telephone']
           },
           {
             model: Utilisateur,
             as: 'recepteur',
-            attributes: ['id', 'nom', 'prenom', 'email']
+            attributes: ['id', 'nom', 'prenom', 'email', 'telephone']
           },
         ],
         order: [['created_at', 'DESC']]
@@ -317,8 +440,8 @@ class EnvoieColisService {
       const colis = await Colis.findOne({
         where: { reference },
         include: [
-          { model: Utilisateur, as: 'expediteur', attributes: ['id', 'nom', 'prenom', 'email'] },
-          { model: Utilisateur, as: 'recepteur',  attributes: ['id', 'nom', 'prenom', 'email'] },
+          { model: Utilisateur, as: 'expediteur', attributes: ['id', 'nom', 'prenom', 'email', 'telephone'] },
+          { model: Utilisateur, as: 'recepteur',  attributes: ['id', 'nom', 'prenom', 'email', 'telephone'] },
         ],
       });
 
@@ -382,7 +505,7 @@ class EnvoieColisService {
           {
             model: Utilisateur,
             as: 'expediteur',
-            attributes: ['id', 'nom', 'prenom', 'email']
+            attributes: ['id', 'nom', 'prenom', 'email', 'telephone']
           }
         ],
         order: [['created_at', 'DESC']],

@@ -63,6 +63,7 @@ exports.login = async (req, res) => {
     logger.info('Connexion utilisateur réussie', { user_id: result.utilisateur?.id });
     return res.status(200).json({
       token: result.token,
+      refreshToken: result.refreshToken,
       utilisateur: formatUser(result.utilisateur)
     });
   } catch (err) {
@@ -106,7 +107,25 @@ exports.refresh = async (req, res) => {
       { expiresIn: jwtConfig.expiresIn }
     );
 
-    return res.status(200).json({ token: newToken });
+    // Rotation : l'ancien refresh token est révoqué et remplacé par un
+    // nouveau. Un rejeu de l'ancien (fuite) échouera désormais.
+    const newRefreshToken = jwt.sign(
+      { id: payload.id, role: payload.role },
+      jwtConfig.refreshSecret,
+      { expiresIn: jwtConfig.refreshExpiresIn }
+    );
+    const newHash = crypto.createHash('sha256').update(newRefreshToken).digest('hex');
+    const { exp } = jwt.decode(newRefreshToken);
+
+    await stored.update({ revoked: true });
+    await RefreshToken.create({
+      tokenHash: newHash,
+      utilisateurId: payload.id,
+      expiresAt: new Date(exp * 1000),
+      revoked: false,
+    });
+
+    return res.status(200).json({ token: newToken, refreshToken: newRefreshToken });
   } catch (err) {
     logger.error('Erreur dans refresh', { error: err.message, stack: err.stack });
     return res.status(500).json({ message: 'Erreur serveur' });

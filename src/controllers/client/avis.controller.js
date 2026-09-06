@@ -6,7 +6,9 @@ const { Op, fn, col, literal } = require('sequelize');
 exports.donnerAvis = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { colis_id, note, commentaire } = req.body;
+    // Tolérance de nommage : accepte `colis_id` (canonique) ou `colisId`.
+    const { note, commentaire } = req.body;
+    const colis_id = req.body.colis_id ?? req.body.colisId;
 
     if (!colis_id || !note) {
       return res.status(400).json({ success: false, message: 'colis_id et note sont obligatoires' });
