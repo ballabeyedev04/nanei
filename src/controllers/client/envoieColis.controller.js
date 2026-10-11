@@ -8,7 +8,10 @@ const ServiceRateService = require('../../services/serviceRate.service');
 
 // Contrôleur existant (envoi de colis)
 exports.envoieColisController = async (req, res) => {
-  const { recepteurId, destinataireManuel, poids, prix, destination, description, type_colis } = req.body;
+  const {
+    recepteurId, destinataireManuel, poids, prix, destination, description, type_colis,
+    countryId, shippingType, needsPickup, needsDelivery,
+  } = req.body;
   const utilisateurConnecte = req.user;
 
   try {
@@ -20,7 +23,11 @@ exports.envoieColisController = async (req, res) => {
       utilisateurConnecte,
       destination,
       description,
-      type_colis
+      type_colis,
+      countryId,
+      shippingType,
+      needsPickup,
+      needsDelivery,
     });
 
     if (!result.success) {
@@ -272,10 +279,10 @@ exports.marquerNotificationCommeLueController = async (req, res) => {
   try {
     const { notificationId } = req.params;
 
-    const result = await EnvoieColisService.marquerNotificationCommeLue(notificationId);
+    const result = await EnvoieColisService.marquerNotificationCommeLue(notificationId, req.user.id);
 
     if (!result.success) {
-      return res.status(400).json({ message: result.message });
+      return res.status(result.status || 400).json({ message: result.message });
     }
 
     return res.status(200).json({ message: 'Notification marquée comme lue', data: result.data });
@@ -283,6 +290,20 @@ exports.marquerNotificationCommeLueController = async (req, res) => {
     logger.error('Erreur dans marquerNotificationCommeLueController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
       message: 'Erreur serveur lors de la mise à jour de la notification',
+      erreur: err.message
+    });
+  }
+};
+
+// 🔹 Marquer toutes les notifications de l'utilisateur connecté comme lues
+exports.marquerToutesNotificationsLuesController = async (req, res) => {
+  try {
+    const result = await EnvoieColisService.marquerToutesNotificationsLues(req.user.id);
+    return res.status(200).json({ message: 'Notifications marquées comme lues', data: { nombre: result.nombre } });
+  } catch (err) {
+    logger.error('Erreur dans marquerToutesNotificationsLuesController', { error: err.message, stack: err.stack, user_id: req.user?.id });
+    return res.status(500).json({
+      message: 'Erreur serveur lors de la mise à jour des notifications',
       erreur: err.message
     });
   }

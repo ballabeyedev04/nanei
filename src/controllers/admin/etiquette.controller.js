@@ -1,3 +1,4 @@
+const { typeTransportDuColis } = require('../../utils/typeTransport');
 const Colis = require('../../models/colis.model');
 const logger = require('../../config/logger');
 const Utilisateur = require('../../models/utilisateur.model');
@@ -45,7 +46,7 @@ exports.genererEtiquetteAdmin = async (req, res) => {
       recepteurTelephone: colis.recepteur?.telephone || '',
       recepteurEmail: colis.recepteur?.email || '',
       recepteurPays: colis.destination || '',
-      typeTransport: colis.type_colis || 'aerien',
+      typeTransport: typeTransportDuColis(colis),
       poids: colis.poids,
       createdAt: colis.createdAt,
     };

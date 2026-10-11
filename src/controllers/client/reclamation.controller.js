@@ -12,20 +12,40 @@ const upload = createUploader({
 
 exports.upload = upload;
 
+// Types de réclamation acceptés (valeurs de l'ENUM en base). Les variantes
+// sans accent (« endommage ») envoyées par d'anciennes versions de l'app sont
+// ramenées à la valeur canonique.
+const TYPES_RECLAMATION = {
+  perdu: 'perdu',
+  endommage: 'endommagé',
+  'endommagé': 'endommagé',
+  retard: 'retard',
+  autre: 'autre',
+};
+
 // ── CLIENT : créer une réclamation ──────────────────────────────────────────
 exports.creer = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { colis_id, type, description } = req.body;
+    const { colis_id, description } = req.body;
 
-    if (!colis_id || !type || !description) {
+    if (!colis_id || !req.body.type || !description) {
       return res.status(400).json({ success: false, message: 'Champs obligatoires manquants' });
     }
 
-    // Vérifier que le colis appartient à l'utilisateur
+    const type = TYPES_RECLAMATION[String(req.body.type).trim().toLowerCase()];
+    if (!type) {
+      return res.status(400).json({
+        success: false,
+        message: 'Type de réclamation invalide (perdu, endommagé, retard ou autre)',
+      });
+    }
+
+    // Le colis doit concerner l'utilisateur : l'expéditeur OU le destinataire
+    // (c'est souvent le destinataire qui constate un colis endommagé).
     const colis = await Colis.findByPk(colis_id);
     if (!colis) return res.status(404).json({ success: false, message: 'Colis introuvable' });
-    if (colis.expediteurId !== userId) {
+    if (colis.expediteurId !== userId && colis.recepteurId !== userId) {
       return res.status(403).json({ success: false, message: 'Ce colis ne vous appartient pas' });
     }
 

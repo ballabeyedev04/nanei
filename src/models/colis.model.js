@@ -49,8 +49,16 @@ const Colis = sequelize.define('Colis', {
     type: DataTypes.TEXT,
     allowNull: true
   },
+  // Nature du colis saisie par l'utilisateur (« Vêtement », « Document »…)
   type_colis: {
     type: DataTypes.STRING,
+    allowNull: true
+  },
+
+  // Mode de transport choisi à l'envoi : 'aerien' | 'maritime' (sans accent).
+  // Voir utils/typeTransport.js pour la lecture (avec repli sur type_colis).
+  type_transport: {
+    type: DataTypes.STRING(20),
     allowNull: true
   },
 

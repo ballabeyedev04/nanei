@@ -35,4 +35,7 @@ router.get('/mes-notifications', authMiddleware, envoieColisController.getNotifi
 
 router.patch('/lire-notifications/:notificationId', authMiddleware, envoieColisController.marquerNotificationCommeLueController);
 
+// 🔹 Marquer toutes les notifications de l'utilisateur comme lues
+router.post('/notifications/mark-all-read', authMiddleware, envoieColisController.marquerToutesNotificationsLuesController);
+
 module.exports = router;

@@ -83,10 +83,16 @@ cd /var/www/nanei-api
 # Exécuter le script de déploiement
 bash deploy/deploy.sh
 
-# OU déployer manuellement :
-docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml exec -T backend npm run migrate
+# OU, code déjà à jour : build + sauvegarde + migrations + redémarrage
+bash deploy/release.sh
 ```
+
+> Les migrations sont **automatiques** : chaque push sur `main` déclenche le
+> CI/CD, qui exécute `deploy/release.sh` sur le serveur. Ordre : build de la
+> nouvelle image → sauvegarde `backups/pre-deploy_*.sql.gz` → `npm run migrate`
+> avec la nouvelle image → redémarrage du backend → contrôle `/health`. Si une
+> migration échoue, l'ancienne version reste en ligne et le job GitHub est en
+> échec.
 
 ### 5. Configurer Nginx + Let's Encrypt
 
@@ -140,12 +146,16 @@ cd /var/www/nanei-api
 docker compose -f docker-compose.prod.yml restart backend
 ```
 
-### Exécuter les migrations manuellement
+### Exécuter les migrations manuellement (normalement inutile : fait par le CI/CD)
 
 ```bash
 cd /var/www/nanei-api
-docker compose -f docker-compose.prod.yml exec -T backend npm run migrate
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T backend npm run migrate:status
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T backend npm run migrate
 ```
+
+En cas de problème, la sauvegarde prise juste avant la migration est dans
+`backups/pre-deploy_<date>.sql.gz` (les 5 dernières sont conservées).
 
 ### Sauvegarder la base de données
 

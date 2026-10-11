@@ -1,5 +1,6 @@
 const messageClientService = require('../services/messageClient.service');
 const logger = require('../config/logger');
+const { email: emailSchema } = require('../validations/common');
 
 exports.envoyerMessage = async (req, res) => {
   try {
@@ -12,7 +13,17 @@ exports.envoyerMessage = async (req, res) => {
       });
     }
 
-    const message = await messageClientService.envoyerMessage({ email, objet, description });
+    // Contrôles AVANT l'insertion : sinon la validation Sequelize (isEmail,
+    // longueur de colonne) remontait en 500 au lieu d'une erreur client.
+    const { error: erreurEmail } = emailSchema.validate(email);
+    if (erreurEmail) {
+      return res.status(400).json({ success: false, message: 'Adresse email invalide.' });
+    }
+    if (String(objet).trim().length > 200) {
+      return res.status(400).json({ success: false, message: "L'objet ne doit pas dépasser 200 caractères." });
+    }
+
+    const message = await messageClientService.envoyerMessage({ email: email.trim(), objet: String(objet).trim(), description });
 
     return res.status(201).json({
       success: true,

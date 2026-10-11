@@ -1,3 +1,4 @@
+const { typeTransportDuColis } = require('../utils/typeTransport');
 const { Colis, Utilisateur, ColisHistorique } = require('../models');
 const logger = require('../config/logger');
 const { suiviPublicHtml, suiviIntrouvableHtml } = require('../pdf/suiviPublic.template');
@@ -78,10 +79,16 @@ exports.suivrePublic = async (req, res) => {
       destination: colis.destination,
       poids: colis.poids,
       type_colis: colis.type_colis,
+      // Mode de transport canonique : 'aerien' | 'maritime'
+      type_transport: typeTransportDuColis(colis),
       created_at: colis.createdAt,
       expediteur,
       recepteur,
-      historique: colis.historique || [],
+      // Ordre chronologique garanti (l'`order` placé dans l'include n'est
+      // pas appliqué par Sequelize).
+      historique: (colis.historique || [])
+        .map((h) => (typeof h.toJSON === 'function' ? h.toJSON() : h))
+        .sort((a, b) => new Date(a.created_at || a.createdAt) - new Date(b.created_at || b.createdAt)),
     };
 
     if (veutJson) {

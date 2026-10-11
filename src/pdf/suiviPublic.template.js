@@ -41,15 +41,15 @@ function formatDate(date) {
  */
 function suiviPublicHtml(colis) {
   const {
-    reference, statut, destination, poids, type_colis,
+    reference, statut, destination, poids, type_transport,
     created_at, expediteur, recepteur, historique = [],
   } = colis;
 
   const statutInfo = STATUT_INFO[statut] || STATUT_INFO.en_attente;
   const etapeActuelleIndex = ETAPES.findIndex((e) => e.key === statut);
 
-  const transportLabel = type_colis === 'aerien' ? 'Transport aérien' : 'Transport maritime';
-  const transportIcone = type_colis === 'aerien' ? '✈️' : '🚢';
+  const transportLabel = type_transport !== 'maritime' ? 'Transport aérien' : 'Transport maritime';
+  const transportIcone = type_transport !== 'maritime' ? '✈️' : '🚢';
 
   // Historique trié du plus récent au plus ancien pour l'affichage (timeline
   // descendante — l'événement le plus récent en haut, plus intuitif).

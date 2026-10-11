@@ -7,6 +7,8 @@ const bcrypt = require('bcrypt');
 const { bcryptConfig } = require('../../config/security');
 const logger = require('../../config/logger');
 const { sendSMS } = require('../twilio.service');
+const PricingCalculatorService = require('../pricingCalculator.service');
+const { normaliserTypeTransport } = require('../../utils/typeTransport');
 
 class EnvoieColisService {
 
@@ -95,6 +97,41 @@ class EnvoieColisService {
     }
   }
 
+  // 🔹 Prix d'un colis — calculé CÔTÉ SERVEUR à partir de la grille
+  // tarifaire (jamais le prix envoyé par le client, qui pourrait être
+  // falsifié). Le mobile (>= 1.0.2+13) envoie countryId + shippingType +
+  // needsPickup + needsDelivery.
+  //
+  // Anciennes versions de l'app (qui n'envoient que `prix`) : tolérées tant
+  // que PRIX_SERVEUR_OBLIGATOIRE !== 'true', avec un avertissement dans les
+  // logs. Passer la variable à 'true' une fois les anciennes versions
+  // retirées du store.
+  static async resoudrePrix({ countryId, shippingType, needsPickup, needsDelivery, poids, prix }) {
+    if (countryId && shippingType) {
+      const result = await PricingCalculatorService.calculateTotalPrice(
+        countryId,
+        poids,
+        shippingType,
+        needsPickup === true || needsPickup === 'true',
+        needsDelivery === true || needsDelivery === 'true'
+      );
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+      return { prix: result.data.total, destination: result.data.breakdown.country };
+    }
+
+    if (process.env.PRIX_SERVEUR_OBLIGATOIRE === 'true') {
+      throw new Error("Version de l'application obsolète : mettez à jour l'application pour envoyer un colis");
+    }
+    const prixClient = Number(prix);
+    if (!Number.isFinite(prixClient) || prixClient <= 0) {
+      throw new Error('Prix invalide');
+    }
+    logger.warn("Prix colis fourni par le client (ancienne version de l'app, sans countryId/shippingType)", { prix: prixClient });
+    return { prix: prixClient, destination: null };
+  }
+
   // 🔹 Générer référence
   static async genererReferenceColis() {
 
@@ -128,12 +165,23 @@ class EnvoieColisService {
     utilisateurConnecte,
     destination,
     description,
-    type_colis
+    type_colis,
+    countryId,
+    shippingType,
+    needsPickup,
+    needsDelivery
   }) {
 
     const transaction = await sequelize.transaction();
 
     try {
+      if (!destination && !countryId) {
+        throw new Error('La destination est obligatoire');
+      }
+      const tarif = await this.resoudrePrix({ countryId, shippingType, needsPickup, needsDelivery, poids, prix });
+      prix = tarif.prix;
+      destination = tarif.destination || destination;
+
       // ✅ Résoudre le récepteur : soit un compte existant sélectionné dans la
       // recherche (recepteurId), soit un destinataire saisi manuellement
       // (destinataireManuel) — dans ce cas on réutilise/crée un compte léger.
@@ -160,7 +208,8 @@ class EnvoieColisService {
         prix,
         destination,
         description: description || null,
-        type_colis
+        type_colis,
+        type_transport: normaliserTypeTransport(shippingType),
       }, { transaction });
 
       await Notifications.create({
@@ -242,11 +291,18 @@ class EnvoieColisService {
       const colisCrees = [];
 
       for (const item of items) {
-        const { recepteurId, destinataireManuel, poids, prix, destination, description, type_colis } = item;
+        const { recepteurId, destinataireManuel, poids, description, type_colis,
+                countryId, shippingType, needsPickup, needsDelivery } = item;
 
-        if ((!recepteurId && !destinataireManuel) || !poids || !prix || !destination) {
-          throw new Error('Un des colis du lot est incomplet (destinataire, poids, prix ou destination manquant)');
+        if ((!recepteurId && !destinataireManuel) || !poids || (!item.destination && !countryId)) {
+          throw new Error('Un des colis du lot est incomplet (destinataire, poids ou destination manquant)');
         }
+
+        const tarif = await this.resoudrePrix({
+          countryId, shippingType, needsPickup, needsDelivery, poids, prix: item.prix,
+        });
+        const prix = tarif.prix;
+        const destination = tarif.destination || item.destination;
 
         let recepteur;
         if (destinataireManuel) {
@@ -270,6 +326,7 @@ class EnvoieColisService {
           destination,
           description: description || null,
           type_colis,
+          type_transport: normaliserTypeTransport(shippingType),
           lot_id: lotId,
         }, { transaction });
 
@@ -525,11 +582,14 @@ class EnvoieColisService {
     }
   }
 
-  static async marquerNotificationCommeLue(notificationId) {
+  static async marquerNotificationCommeLue(notificationId, utilisateurId) {
     try {
-      const notif = await Notifications.findByPk(notificationId);
+      // Seul le destinataire de la notification peut la marquer comme lue.
+      const notif = await Notifications.findOne({
+        where: { id: notificationId, recepteurId: utilisateurId },
+      });
       if (!notif) {
-        throw new Error('Notification introuvable');
+        return { success: false, status: 404, message: 'Notification introuvable' };
       }
 
       notif.statut = 'lu';
@@ -547,6 +607,15 @@ class EnvoieColisService {
         message: error.message
       };
     }
+  }
+
+  // 🔹 Marquer toutes les notifications non lues de l'utilisateur comme lues
+  static async marquerToutesNotificationsLues(utilisateurId) {
+    const [nombre] = await Notifications.update(
+      { statut: 'lu' },
+      { where: { recepteurId: utilisateurId, statut: 'non_lu' } }
+    );
+    return { success: true, nombre };
   }
 
 }

@@ -18,7 +18,7 @@ function factureHtml(data) {
     factureNumero, dateEmission,
     colisReference, destination, poids, typeColis,
     payeurPrenom, payeurNom, payeurEmail, payeurTelephone,
-    prixTotal, montantPaye, moyenPaiement, dateReglement,
+    prixTotal, montantPaye, montantXof, moyenPaiement, dateReglement,
   } = data;
 
   const moyenLabel = moyenPaiement === 'wave' ? 'Wave' : moyenPaiement === 'orange_money' ? 'Orange Money' : '—';
@@ -28,6 +28,9 @@ function factureHtml(data) {
 
   const formatXOF = (n) =>
     new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Number(n) || 0) + ' FCFA';
+  // Les prix des colis sont en euros ; le FCFA est le montant débité.
+  const formatEUR = (n) =>
+    new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0) + ' €';
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -364,7 +367,7 @@ function factureHtml(data) {
           <div class="inv-row-label">Service d'envoi de colis</div>
           <div class="inv-row-sub">${colisReference} · ${destination} · ${poids} kg</div>
         </div>
-        <div class="inv-row-val">${formatXOF(prixTotal)}</div>
+        <div class="inv-row-val">${formatEUR(prixTotal)}</div>
       </div>
       <div class="inv-row">
         <div>
@@ -378,7 +381,7 @@ function factureHtml(data) {
       </div>
       <div class="inv-total">
         <div class="inv-total-label">Montant total réglé</div>
-        <div class="inv-total-val">${formatXOF(montantPaye)}</div>
+        <div class="inv-total-val">${formatEUR(montantPaye)}<div style="font-size:12px;font-weight:500;opacity:.75">soit ${formatXOF(montantXof)}</div></div>
       </div>
     </div>
 

@@ -32,16 +32,9 @@ jobs:
             # a un jour un commit local (config spécifique à la machine).
             git pull --rebase origin main
 
-            # Rebuilder et relancer uniquement le backend (PostgreSQL reste intact)
-            docker compose -f docker-compose.prod.yml up -d --build backend
-
-            # Lancer les nouvelles migrations (src/migrations/) — le schéma
-            # n'est plus altéré via sequelize.sync({alter:true}) en
-            # production (voir src/server.js), tout changement de structure
-            # passe désormais par une migration versionnée.
-            docker compose -f docker-compose.prod.yml exec -T backend npm run migrate
-
-            # Vérifier que le backend est healthy — port hôte 4000 (voir
-            # docker-compose.prod.yml, mappé sur le port 3000 du conteneur)
-            sleep 10
-            curl -f http://localhost:4000/health || exit 1
+            # Mise en service : build de la nouvelle image, sauvegarde de la
+            # base, MIGRATIONS AUTOMATIQUES (src/migrations/) puis redémarrage
+            # du backend et contrôle /health. Si une migration échoue,
+            # l'ancienne version reste en ligne et ce job passe en échec.
+            # Détail et ordre des étapes : deploy/release.sh
+            bash deploy/release.sh

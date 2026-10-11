@@ -3,9 +3,27 @@ const logger = require('../../config/logger');
 const { Colis, Utilisateur } = require('../../models');
 const WaveService = require('../payment/wave.service');
 const OrangeMoneyService = require('../payment/orangeMoney.service');
+const TauxChangeService = require('../tauxChange.service');
 
 const BASE_URL    = process.env.BACKEND_URL   || 'http://localhost:3000';
 const APP_SCHEME  = process.env.APP_DEEP_LINK || 'nanei';
+
+// Bornes du montant réellement débité (en XOF) — remplacent l'ancien
+// middleware validatePaymentAmount, qui contrôlait un montant envoyé par le
+// client alors que le montant facturé est calculé ici, côté serveur.
+const MONTANT_MIN_XOF = 100;
+const MONTANT_MAX_XOF = 10000000;
+
+/**
+ * Montant à débiter chez Wave / Orange Money, en XOF.
+ * Le prix d'un colis est stocké en EUROS (affiché en € dans l'admin et le
+ * mobile) ; les opérateurs débitent en XOF : on convertit avec le taux de
+ * change actif (table taux_change, 655.957 par défaut).
+ */
+async function montantEnXof(prixEur) {
+  const taux = await TauxChangeService.getTauxActif();
+  return { montantXof: Math.round(Number(prixEur) * Number(taux)), taux };
+}
 
 class ClientPaiementService {
 
@@ -60,6 +78,15 @@ class ClientPaiementService {
       return { success: false, message: 'Ce colis est déjà payé' };
     }
 
+    // Montant calculé côté serveur à partir du prix du colis (EUR -> XOF)
+    const { montantXof, taux } = await montantEnXof(colis.prix);
+    if (!Number.isFinite(montantXof) || montantXof < MONTANT_MIN_XOF) {
+      return { success: false, message: `Montant minimum : ${MONTANT_MIN_XOF} XOF` };
+    }
+    if (montantXof > MONTANT_MAX_XOF) {
+      return { success: false, message: `Montant maximum : ${MONTANT_MAX_XOF} XOF` };
+    }
+
     // URLs de callback
     const successUrl = `${BASE_URL}/nanei/paiements/retour?statut=succes&colisId=${colisId}&ref=${paiement.id}`;
     const errorUrl   = `${BASE_URL}/nanei/paiements/retour?statut=echec&colisId=${colisId}&ref=${paiement.id}`;
@@ -71,7 +98,7 @@ class ClientPaiementService {
     try {
       if (moyenPaiement === 'wave') {
         const result = await WaveService.initierPaiement({
-          montant:    colis.prix,
+          montant:    montantXof,
           reference:  paiement.id,
           successUrl,
           errorUrl,
@@ -81,7 +108,7 @@ class ClientPaiementService {
 
       } else if (moyenPaiement === 'orange_money') {
         const result = await OrangeMoneyService.initierPaiement({
-          montant:   colis.prix,
+          montant:   montantXof,
           orderId:   paiement.id,
           returnUrl: successUrl,
           cancelUrl: errorUrl,
@@ -102,7 +129,18 @@ class ClientPaiementService {
         referenceTransaction: referenceSession,
       });
 
-      return { success: true, data: { checkoutUrl, paiementId: paiement.id } };
+      logger.info('Paiement initié', { paiement_id: paiement.id, prix_eur: colis.prix, taux, montant_xof: montantXof, moyen: moyenPaiement });
+      return {
+        success: true,
+        data: {
+          checkoutUrl,
+          paiementId: paiement.id,
+          montant: montantXof,
+          devise: 'XOF',
+          prixEur: Number(colis.prix),
+          tauxChange: taux,
+        },
+      };
 
     } catch (err) {
       logger.error(`Paiement erreur initiation`, { moyen: moyenPaiement, error: err.message, stack: err.stack, paiement_id: paiement.id });
@@ -111,27 +149,63 @@ class ClientPaiementService {
     }
   }
 
-  /** Traitement retour paiement (redirect depuis Wave/OM) */
+  /**
+   * Traitement du retour navigateur après paiement (redirect Wave / OM).
+   *
+   * SÉCURITÉ : cette URL est publique et ses paramètres (statut, ref) sont
+   * modifiables par n'importe qui. On ne se fie donc JAMAIS au paramètre
+   * `statut` pour valider un paiement :
+   *  - Wave : on interroge l'API Wave (session de checkout) et on ne marque
+   *    `paye` que si Wave confirme le paiement, la référence et le montant ;
+   *  - Orange Money : pas de vérification synchrone possible ici, le
+   *    paiement reste `en_cours` jusqu'au webhook signé d'Orange Money.
+   * Le paramètre `statut` ne sert plus qu'à choisir le message affiché.
+   */
   static async traiterRetour(colisId, paiementId, statut) {
-    const paiement = await Paiement.findByPk(paiementId);
-    if (!paiement) return { success: false };
+    const lien = (etat) => `${APP_SCHEME}://paiement/${etat}?colisId=${encodeURIComponent(colisId || '')}`;
 
-    if (statut === 'succes') {
-      const colis = await Colis.findByPk(colisId);
-      await paiement.update({
-        statut: 'paye',
-        montantPaye: colis?.prix ?? paiement.prixTotal,
-      });
-    } else {
-      await paiement.update({ statut: 'echoue' });
+    const paiement = paiementId ? await Paiement.findByPk(paiementId).catch(() => null) : null;
+    if (!paiement || (colisId && paiement.colisId !== colisId)) {
+      return { success: false, etat: 'echec', deepLink: lien('echec') };
     }
 
-    // Retourner une page HTML de confirmation qui redirige vers l'app
-    const deepLink = statut === 'succes'
-      ? `${APP_SCHEME}://paiement/succes?colisId=${colisId}`
-      : `${APP_SCHEME}://paiement/echec?colisId=${colisId}`;
+    if (paiement.statut === 'paye') {
+      return { success: true, etat: 'succes', deepLink: lien('succes') };
+    }
 
-    return { success: true, deepLink, statut };
+    if (paiement.moyenPaiement === 'wave' && paiement.referenceTransaction) {
+      try {
+        const session = await WaveService.verifierStatut(paiement.referenceTransaction);
+        const colis = await Colis.findByPk(paiement.colisId);
+        const { montantXof } = await montantEnXof(colis?.prix ?? paiement.prixTotal);
+        const confirme =
+          session?.checkout_status === 'complete' &&
+          (!session.payment_status || session.payment_status === 'succeeded') &&
+          session.client_reference === paiement.id &&
+          Math.round(Number(session.amount)) === montantXof;
+
+        if (confirme) {
+          await paiement.update({
+            statut: 'paye',
+            montantPaye: colis?.prix ?? paiement.prixTotal,
+            webhookPayload: session,
+          });
+          return { success: true, etat: 'succes', deepLink: lien('succes') };
+        }
+        if (session?.checkout_status === 'error' || session?.checkout_status === 'expired') {
+          await paiement.update({ statut: 'echoue', webhookPayload: session });
+          return { success: true, etat: 'echec', deepLink: lien('echec') };
+        }
+      } catch (err) {
+        logger.warn('Vérification Wave au retour impossible', { paiement_id: paiement.id, error: err.message });
+      }
+    }
+
+    // Non confirmé par l'opérateur : on n'écrit rien en base.
+    if (statut !== 'succes') {
+      return { success: true, etat: 'echec', deepLink: lien('echec') };
+    }
+    return { success: true, etat: 'verification', deepLink: lien('verification') };
   }
 
   /** Webhook Wave */

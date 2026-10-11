@@ -30,15 +30,21 @@ exports.retourPaiement = async (req, res) => {
     const { statut, colisId, ref } = req.query;
     const result = await ClientPaiementService.traiterRetour(colisId, ref, statut);
 
-    // Page HTML minimale qui redirige vers l'app via deep link
-    const statusFr = statut === 'succes' ? 'réussi ✅' : 'échoué ❌';
+    // Le message affiché dépend de l'état VÉRIFIÉ (result.etat), pas du
+    // paramètre `statut` de l'URL (modifiable par n'importe qui).
+    const ECRANS = {
+      succes:       { icone: '✅', titre: 'Paiement réussi',                   texte: 'Votre paiement a bien été enregistré.' },
+      verification: { icone: '⏳', titre: 'Paiement en cours de vérification', texte: "Votre paiement est en cours de confirmation par l'opérateur. Son statut sera mis à jour dans l'application dans quelques instants." },
+      echec:        { icone: '❌', titre: 'Paiement échoué',                   texte: 'Le paiement a échoué ou a été annulé.' },
+    };
+    const ecran = ECRANS[result.etat] || ECRANS.echec;
     return res.send(`
       <!DOCTYPE html>
       <html lang="fr">
       <head>
         <meta charset="UTF-8"/>
         <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        <title>Paiement ${statusFr}</title>
+        <title>${ecran.titre}</title>
         <style>
           body { font-family: -apple-system, sans-serif; display: flex; align-items: center;
                  justify-content: center; min-height: 100vh; margin: 0; background: #f9f9f9; }
@@ -57,9 +63,9 @@ exports.retourPaiement = async (req, res) => {
       </head>
       <body>
         <div class="card">
-          <div class="icon">${statut === 'succes' ? '✅' : '❌'}</div>
-          <h2>Paiement ${statusFr}</h2>
-          <p>${statut === 'succes' ? 'Votre paiement a bien été enregistré.' : 'Le paiement a échoué ou a été annulé.'}</p>
+          <div class="icon">${ecran.icone}</div>
+          <h2>${ecran.titre}</h2>
+          <p>${ecran.texte}</p>
           <a href="${result.deepLink || '#'}">Retour à l'application</a>
         </div>
       </body>

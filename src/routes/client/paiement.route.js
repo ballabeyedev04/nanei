@@ -3,11 +3,12 @@ const router   = express.Router();
 const ctrl     = require('../../controllers/client/paiement.controller');
 const auth     = require('../../middlewares/auth.middleware');
 const validateWebhookSignature = require('../../middlewares/webhookSignature.middleware'); // SÉCURITÉ: Validation signature webhook
-const validatePaymentAmount = require('../../middlewares/paymentValidation.middleware'); // SÉCURITÉ: Validation montants
 
 // Routes protégées
 router.get('/',                         auth, ctrl.mesPaiements);
-router.post('/:colisId/initier',        auth, validatePaymentAmount, ctrl.initierPaiement);
+// Le montant n'est plus envoyé par le client : il est calculé côté serveur
+// (prix du colis converti EUR -> XOF) et borné dans le service.
+router.post('/:colisId/initier',        auth, ctrl.initierPaiement);
 
 // Retour navigateur après paiement (pas de auth — redirect depuis le provider)
 router.get('/retour',                   ctrl.retourPaiement);

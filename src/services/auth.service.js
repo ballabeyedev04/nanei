@@ -196,12 +196,55 @@ class AuthService {
   }
 
 
+  // 🔹 Retrouve un utilisateur à partir d'un numéro saisi librement.
+  // Les numéros sont enregistrés au format international (« +22376000000 »,
+  // saisi via le sélecteur de pays de l'app), mais l'utilisateur tape souvent
+  // son numéro local (« 76 00 00 00 », « 0612345678 ») ou « 00223… ».
+  //  1. correspondance exacte (comportement historique) ;
+  //  2. correspondance sur les chiffres seuls ;
+  //  3. le numéro enregistré SE TERMINE par le numéro saisi (sans 0 initial),
+  //     à condition qu'il n'y ait qu'un seul compte possible (sinon ambigu →
+  //     on refuse plutôt que de connecter la mauvaise personne).
+  static async trouverParTelephone(saisie) {
+    const brut = String(saisie || '').trim();
+    if (!brut) return null;
+
+    const exact = await Utilisateur.findOne({ where: { telephone: brut } });
+    if (exact) return exact;
+
+    let chiffres = brut.replace(/\D/g, '');
+    if (chiffres.startsWith('00')) chiffres = chiffres.slice(2);
+    if (chiffres.length < 7) return null;
+
+    const telNormalise = sequelize.fn('regexp_replace', sequelize.col('telephone'), '[^0-9]', '', 'g');
+
+    const memesChiffres = await Utilisateur.findAll({
+      where: sequelize.where(telNormalise, chiffres),
+      limit: 2,
+    });
+    if (memesChiffres.length === 1) return memesChiffres[0];
+
+    const local = chiffres.replace(/^0+/, '');
+    if (local.length < 7) return null;
+    const candidats = await Utilisateur.findAll({
+      where: sequelize.where(telNormalise, { [Op.like]: `%${local}` }),
+      limit: 5,
+    });
+    if (candidats.length === 1) return candidats[0];
+    const actifs = candidats.filter((u) => u.statut === 'actif');
+    if (actifs.length === 1) return actifs[0];
+    if (candidats.length > 1) {
+      logger.warn('Connexion par téléphone ambiguë', { nb_comptes: candidats.length });
+    }
+    return null;
+  }
+
   // -------------------- CONNEXION --------------------
   static async login({ identifiant, mot_de_passe }) {
     const isEmail = /\S+@\S+\.\S+/.test(identifiant);
-    const utilisateur = await Utilisateur.findOne({
-      where: isEmail ? { email: identifiant.trim().toLowerCase() } : { telephone: identifiant },
-    });
+    const utilisateur = isEmail
+      ? await Utilisateur.findOne({ where: { email: identifiant.trim().toLowerCase() } })
+      : await this.trouverParTelephone(identifiant);
 
     if (!utilisateur)
       return {

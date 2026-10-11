@@ -3,6 +3,16 @@ const { factureHtml } = require('../../pdf/facture.template');
 const Paiement = require('../../models/paiement.model');
 const { Colis, Utilisateur } = require('../../models');
 
+const TauxChangeService = require('../tauxChange.service');
+
+/** Montant effectivement débité en XOF pour un paiement validé. */
+async function montantDebiteXof(paiement) {
+  const debite = Number(paiement.webhookPayload?.amount);
+  if (Number.isFinite(debite) && debite > 0) return Math.round(debite);
+  const taux = await TauxChangeService.getTauxActif();
+  return Math.round(Number(paiement.montantPaye || paiement.prixTotal || 0) * Number(taux));
+}
+
 function formatDate(date) {
   if (!date) return '—';
   return new Intl.DateTimeFormat('fr-FR', {
@@ -59,8 +69,12 @@ class FactureService {
       payeurEmail:    payeur.email    || '',
       payeurTelephone: payeur.telephone || '',
       // Paiement
+      // Montants stockés en EUROS (prix du colis) ; l'équivalent FCFA est
+      // le montant réellement débité par l'opérateur (payload Wave) ou, à
+      // défaut, la conversion au taux de change actif.
       prixTotal:      paiement.prixTotal   || 0,
       montantPaye:    paiement.montantPaye || 0,
+      montantXof:     await montantDebiteXof(paiement),
       moyenPaiement:  paiement.moyenPaiement || null,
     };
 

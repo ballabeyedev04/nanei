@@ -16,7 +16,11 @@ const createUploader = ({ maxFileSize, allowedMimeTypes }) => {
     limits: { fileSize: maxFileSize },
     fileFilter: (req, file, cb) => {
       if (allowedMimeTypes.includes(file.mimetype)) cb(null, true);
-      else cb(new Error('Type de fichier non autorisé'), false);
+      else {
+        const err = new Error('Type de fichier non autorisé');
+        err.status = 400;
+        cb(err, false);
+      }
     },
   });
 };

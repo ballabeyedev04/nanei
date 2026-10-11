@@ -40,37 +40,11 @@ git reset --hard origin/main
 echo "📁 Création des répertoires..."
 mkdir -p uploads logs
 
-# ── Démarrer/reconstruire les conteneurs ────────────────────────────────────
-echo "🐳 Construction et démarrage des conteneurs..."
-docker compose -f "$COMPOSE_FILE" up -d --build
-
-# ── Attendre que PostgreSQL soit prêt ────────────────────────────────────────
-echo "⏳ Attente de la disponibilité de PostgreSQL..."
-sleep 10
-
-# ── Exécuter les migrations ─────────────────────────────────────────────────
-echo "🔄 Exécution des migrations Sequelize..."
-docker compose -f "$COMPOSE_FILE" exec -T backend npm run migrate 2>/dev/null || true
-
-# ── Vérifier la santé du backend ────────────────────────────────────────────
-echo "🏥 Vérification de la santé du backend..."
-MAX_ATTEMPTS=5
-ATTEMPT=0
-
-while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-  if curl -f http://localhost:3000/health > /dev/null 2>&1; then
-    echo "✅ Backend est en bonne santé"
-    break
-  fi
-  ATTEMPT=$((ATTEMPT + 1))
-  echo "⏳ Tentative $ATTEMPT/$MAX_ATTEMPTS..."
-  sleep 5
-done
-
-if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-  echo "❌ Erreur : Backend n'est pas devenu healthy"
-  exit 1
-fi
+# ── Build, sauvegarde, migrations, redémarrage, contrôle /health ────────────
+# Même procédure que le CI/CD (voir deploy/release.sh) : les migrations sont
+# exécutées AVANT de redémarrer le backend, et une erreur arrête le
+# déploiement (plus de `|| true` qui masquait les échecs).
+bash deploy/release.sh
 
 # ── Afficher les logs ──────────────────────────────────────────────────────
 echo ""
@@ -79,5 +53,5 @@ docker compose -f "$COMPOSE_FILE" logs backend --tail=20
 
 echo ""
 echo "✅ Déploiement terminé avec succès !"
-echo "🌐 API disponible sur : http://localhost:3000"
+echo "🌐 API disponible sur : http://localhost:4000 (port hôte, derrière Nginx)"
 echo "💻 Pour surveiller les logs : docker compose -f $COMPOSE_FILE logs -f backend"

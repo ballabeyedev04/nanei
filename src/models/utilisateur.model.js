@@ -70,6 +70,11 @@ const User = sequelize.define('User', {
   fcm_token: {
     type: DataTypes.STRING,
     allowNull: true
+  },
+  // URL (Cloudflare R2) de la photo de profil — colonne photo_profil
+  photoProfil: {
+    type: DataTypes.STRING(512),
+    allowNull: true
   }
 
 }, {
