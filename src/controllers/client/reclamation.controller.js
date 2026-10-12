@@ -1,4 +1,7 @@
 const { Reclamation, Colis } = require('../../models');
+const { paginer, avecPagination } = require('../../utils/pagination');
+const STATUTS_RECLAMATION = ['ouverte', 'en_cours', 'resolue', 'rejetee'];
+const { echapperHtml, sujetEmail } = require('../../utils/echapperHtml');
 const logger = require('../../config/logger');
 const { sendEmail } = require('../../services/resend.service');
 const { sendSMS } = require('../../services/sms.service');
@@ -65,6 +68,7 @@ exports.creer = async (req, res) => {
     logger.info('Réclamation créée', { reclamation_id: reclamation.id, colis_id, type, user_id: userId });
     return res.status(201).json({ success: true, message: 'Réclamation créée', reclamation });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
     logger.error('Erreur dans creer reclamation', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
@@ -75,13 +79,13 @@ exports.mesList = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const reclamations = await Reclamation.findAll({
+    const { lignes: reclamations, pagination } = await paginer(Reclamation, {
       where: { utilisateur_id: userId },
       include: [{ model: Colis, as: 'colis', attributes: ['reference', 'statut', 'destination'] }],
       order: [['created_at', 'DESC']],
-    });
+    }, req.query);
 
-    return res.status(200).json({ success: true, reclamations });
+    return res.status(200).json(avecPagination({ success: true, reclamations }, pagination));
   } catch (err) {
     logger.error('Erreur dans mesList reclamation', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -112,20 +116,27 @@ exports.detail = async (req, res) => {
 exports.adminList = async (req, res) => {
   try {
     const where = {};
-    if (req.query.statut) where.statut = req.query.statut;
+    if (req.query.statut) {
+      // Valeur inconnue → 400 (avant : erreur Postgres sur l'enum → 500)
+      if (!STATUTS_RECLAMATION.includes(req.query.statut)) {
+        return res.status(400).json({ success: false, message: `Statut invalide (${STATUTS_RECLAMATION.join(', ')})` });
+      }
+      where.statut = req.query.statut;
+    }
 
     const { Utilisateur } = require('../../models');
 
-    const reclamations = await Reclamation.findAll({
+    // Pagination facultative (?page=&limit=)
+    const { lignes: reclamations, pagination } = await paginer(Reclamation, {
       where,
       include: [
         { model: Colis, as: 'colis', attributes: ['reference', 'statut', 'destination'] },
         { model: Utilisateur, as: 'utilisateur', attributes: ['nom', 'prenom', 'email', 'telephone'] },
       ],
       order: [['created_at', 'DESC']],
-    });
+    }, req.query);
 
-    return res.status(200).json({ success: true, reclamations });
+    return res.status(200).json(avecPagination({ success: true, reclamations }, pagination));
   } catch (err) {
     logger.error('Erreur dans adminList reclamation', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -136,7 +147,10 @@ exports.adminList = async (req, res) => {
 exports.adminUpdate = async (req, res) => {
   try {
     const { id } = req.params;
-    const { statut, commentaire_admin } = req.body;
+    const { statut } = req.body;
+    // Champ attendu : commentaire_admin. `commentaire` accepté aussi (ancienne
+    // version de l'admin, qui l'envoyait sous ce nom et le perdait).
+    const commentaire_admin = req.body.commentaire_admin ?? req.body.commentaire;
 
     const { Utilisateur } = require('../../models');
 
@@ -149,6 +163,9 @@ exports.adminUpdate = async (req, res) => {
 
     if (!reclamation) return res.status(404).json({ success: false, message: 'Réclamation introuvable' });
 
+    if (statut && !STATUTS_RECLAMATION.includes(statut)) {
+      return res.status(400).json({ success: false, message: 'Statut invalide (ouverte, en_cours, resolue ou rejetee)' });
+    }
     if (statut) reclamation.statut = statut;
     if (commentaire_admin !== undefined) reclamation.commentaire_admin = commentaire_admin;
     await reclamation.save();
@@ -156,15 +173,19 @@ exports.adminUpdate = async (req, res) => {
     // Notifier le client
     const client = reclamation.utilisateur;
     const colisRef = reclamation.colis?.reference || '—';
-    const statutLabel = statut || reclamation.statut;
-    const msgTexte = `Votre réclamation pour le colis ${colisRef} a été mise à jour : ${statutLabel}. ${commentaire_admin || ''}`;
+    const LIBELLES_STATUT = { ouverte: 'ouverte', en_cours: 'en cours de traitement', resolue: 'résolue', rejetee: 'rejetée' };
+    const statutLabel = LIBELLES_STATUT[reclamation.statut] || reclamation.statut;
+    const commentaire = (commentaire_admin || '').trim();
+    const msgTexte = `Votre réclamation pour le colis ${colisRef} a été mise à jour : ${statutLabel}.${commentaire ? ` ${commentaire}` : ''}`;
 
     if (client) {
       if (client.email) {
         await sendEmail({
           to: client.email,
-          subject: `Réclamation colis ${colisRef} — ${statutLabel}`,
-          html: `<p>Bonjour ${client.prenom},</p><p>${msgTexte}</p><p>Connectez-vous sur <strong>nanei.app</strong> pour plus de détails.</p>`,
+          subject: sujetEmail(`Réclamation colis ${colisRef} — ${statutLabel}`),
+          // Prénom (saisi par le client) et commentaire (saisi par l'admin)
+          // échappés : jamais interprétés comme HTML.
+          html: `<p>Bonjour ${echapperHtml(client.prenom)},</p><p style="white-space:pre-wrap;">${echapperHtml(msgTexte)}</p><p>Connectez-vous sur <strong>nanei.app</strong> pour plus de détails.</p>`,
         }).catch((e) => logger.warn('Reclamation email erreur', { error: e.message }));
       }
       if (client.telephone) {

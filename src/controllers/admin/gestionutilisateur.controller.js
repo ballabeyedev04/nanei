@@ -5,12 +5,14 @@ const logger = require('../../config/logger');
 // 🔹 Lister utilisateurs particuliers
 exports.listeUtilisateur = async (req, res) => {
   try {
-    const utilisateurs = await GestionUtilisateurService.listeUtilisateur();
+    const { lignes: utilisateurs, pagination } = await GestionUtilisateurService.listeUtilisateur(req.query);
 
     return res.status(200).json({
       success: true,
-      total: utilisateurs.length,
-      data: utilisateurs
+      // total : nombre total de clients (toutes pages), pas seulement la page
+      total: pagination ? pagination.total : utilisateurs.length,
+      data: utilisateurs,
+      ...(pagination ? { pagination } : {}),
     });
 
   } catch (error) {
@@ -40,7 +42,7 @@ exports.activerUtilisateur = async (req, res) => {
   } catch (error) {
     logger.error('Erreur dans activerUtilisateur', { error: error.message, stack: error.stack, user_id: req.user?.id });
 
-    return res.status(400).json({
+    return res.status(error.message === 'Utilisateur non trouvé' ? 404 : 400).json({
       success: false,
       message: error.message
     });
@@ -64,7 +66,7 @@ exports.desactiverUtilisateur = async (req, res) => {
   } catch (error) {
     logger.error('Erreur dans desactiverUtilisateur', { error: error.message, stack: error.stack, user_id: req.user?.id });
 
-    return res.status(400).json({
+    return res.status(error.message === 'Utilisateur non trouvé' ? 404 : 400).json({
       success: false,
       message: error.message
     });
@@ -93,12 +95,7 @@ exports.nombreUtilisateursParticuliers = async (req, res) => {
 };
 
 //hello world
-exports.hello = async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: "Hello World!"
-  });
-};
+
 
 //rechercher utilisateur
 exports.rechercherUtilisateur = async (req, res) => {

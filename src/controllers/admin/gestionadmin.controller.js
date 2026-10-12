@@ -1,11 +1,14 @@
 const GestionAdminService = require('../../services/admin/gestionadmin.service');
 const logger = require('../../config/logger');
+const { statutEchec } = require('../../utils/statutHttp');
 
 // ===================== LISTE ADMINS =====================
 exports.listeAdmins = async (req, res) => {
     try {
-        const result = await GestionAdminService.listeAdmins(req.user.id);
+        const result = await GestionAdminService.listeAdmins(req.user.id, req.query);
 
+        // Erreur base : 500 (avant : 200 avec success: false)
+        if (result && result.success === false) return res.status(500).json(result);
         return res.status(200).json(result);
 
     } catch (error) {
@@ -32,7 +35,7 @@ exports.ajouterAdmin = async (req, res) => {
         );
 
         if (!result.success) {
-            return res.status(400).json(result);
+            return res.status(statutEchec(result, 400)).json(result);
         }
 
         return res.status(201).json(result);
@@ -54,7 +57,8 @@ exports.activerAdmin = async (req, res) => {
         const result = await GestionAdminService.activerAdmin(id);
 
         if (!result.success) {
-            return res.status(404).json(result);
+            const { status = 404, ...corps } = result;
+            return res.status(status).json(corps);
         }
 
         return res.status(200).json(result);
@@ -73,10 +77,11 @@ exports.desactiverAdmin = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await GestionAdminService.desactiverAdmin(id);
+        const result = await GestionAdminService.desactiverAdmin(id, req.user?.id);
 
         if (!result.success) {
-            return res.status(404).json(result);
+            const { status = 404, ...corps } = result;
+            return res.status(status).json(corps);
         }
 
         return res.status(200).json(result);
@@ -95,6 +100,8 @@ exports.nombreAdmins = async (req, res) => {
     try {
         const result = await GestionAdminService.nombreAdmins();
 
+        // Erreur base : 500 (avant : 200 avec success: false)
+        if (result && result.success === false) return res.status(500).json(result);
         return res.status(200).json(result);
 
     } catch (error) {
@@ -113,6 +120,8 @@ exports.rechercherAdmin = async (req, res) => {
 
         const result = await GestionAdminService.rechercherAdmin({ nom, prenom, email });
 
+        // Erreur base : 500 (avant : 200 avec success: false)
+        if (result && result.success === false) return res.status(500).json(result);
         return res.status(200).json(result);
 
     } catch (error) {

@@ -1,4 +1,9 @@
+const { echapperHtml } = require('../../utils/echapperHtml');
+
 module.exports = function otpPasswordTemplate({ nom, otp }) {
+  // Nom saisi par l'utilisateur à l'inscription : échappé.
+  nom = echapperHtml(nom);
+  otp = echapperHtml(otp);
   return `
 <!DOCTYPE html>
 <html lang="fr">

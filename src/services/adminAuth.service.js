@@ -1,10 +1,14 @@
 const crypto = require('crypto');
+const AuthService = require('./auth.service');
 const Utilisateur = require('../models/utilisateur.model');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { jwtConfig, bcryptConfig } = require('../config/security');
 const { sendEmail } = require('./resend.service');
 const adminResetTemplate = require('../templates/mail/adminResetPassword.template');
+// Import manquant : sans FRONTEND_URL en production, `logger.error` levait une
+// ReferenceError et la demande de réinitialisation finissait en 500.
+const logger = require('../config/logger');
 
 /**
  * Durée d'expiration du token de réinitialisation admin : 10 minutes
@@ -20,6 +24,24 @@ const RESET_EXPIRES_JWT = '10m';
 const MIN_RESPONSE_MS = 400;
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
+
+/**
+ * Adresse publique de l'interface admin, pour les liens envoyés par e-mail.
+ * FRONTEND_URL en priorité ; à défaut en production, la première origine
+ * HTTPS de CORS_ORIGIN ; en développement, http://localhost:5173.
+ * Renvoie null si rien d'utilisable en production (avant : lien vers
+ * localhost envoyé aux admins).
+ */
+function urlAdmin() {
+  const nettoyer = (u) => String(u).trim().replace(/\/+$/, '');
+  if (process.env.FRONTEND_URL) return nettoyer(process.env.FRONTEND_URL);
+  if (process.env.NODE_ENV === 'production') {
+    const https = (process.env.CORS_ORIGIN || '').split(',').map((o) => o.trim()).find((o) => o.startsWith('https://'));
+    return https ? nettoyer(https) : null;
+  }
+  return 'http://localhost:5173';
+}
 
 class AdminAuthService {
 
@@ -75,7 +97,13 @@ class AdminAuthService {
         utilisateur.resetPasswordExpires = new Date(Date.now() + RESET_EXPIRES_MS);
         await utilisateur.save();
 
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const frontendUrl = urlAdmin();
+        if (!frontendUrl) {
+          // Pas d'adresse de l'admin connue en production : on n'envoie PAS un
+          // lien vers localhost (inutilisable). La réponse reste neutre.
+          logger.error('FRONTEND_URL manquant : lien de réinitialisation admin non envoyé', { admin_id: utilisateur.id });
+          return GENERIC_OK;
+        }
         const resetLink = `${frontendUrl}/nanei/admin/reset-password?token=${resetToken}`;
 
         await sendEmail({
@@ -180,7 +208,10 @@ class AdminAuthService {
       utilisateur.mot_de_passe = hashedPassword;
       utilisateur.resetPasswordToken = null;
       utilisateur.resetPasswordExpires = null;
-      utilisateur.passwordChangedAt = new Date();
+      // passwordChangedAt + révocation de tous les refresh tokens : les
+      // sessions ouvertes avant la réinitialisation ne peuvent plus être
+      // renouvelées (avant, seul le jeton d'accès était invalidé).
+      await AuthService.revoquerSessions(utilisateur);
       await utilisateur.save();
 
       return {

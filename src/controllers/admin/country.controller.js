@@ -1,5 +1,6 @@
 const CountryService = require('../../services/country.service');
 const logger = require('../../config/logger');
+const { statutEchec } = require('../../utils/statutHttp');
 
 exports.getCountries = async (req, res) => {
   try {
@@ -13,7 +14,7 @@ exports.getCountries = async (req, res) => {
     const result = await CountryService.getCountries(filters);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(200).json({
@@ -36,7 +37,7 @@ exports.getCountryById = async (req, res) => {
     const result = await CountryService.getCountryById(id);
 
     if (!result.success) {
-      return res.status(404).json(result);
+      return res.status(statutEchec(result, 404)).json(result);
     }
 
     return res.status(200).json({
@@ -57,7 +58,7 @@ exports.createCountry = async (req, res) => {
     const result = await CountryService.createCountry(req.body);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(201).json(result);
@@ -77,7 +78,7 @@ exports.updateCountry = async (req, res) => {
     const result = await CountryService.updateCountry(id, req.body);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(200).json(result);
@@ -97,7 +98,8 @@ exports.deleteCountry = async (req, res) => {
     const result = await CountryService.deleteCountry(id);
 
     if (!result.success) {
-      return res.status(404).json(result);
+      const { status = 400, ...corps } = result;
+      return res.status(status).json(corps);
     }
 
     return res.status(200).json(result);

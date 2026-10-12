@@ -1,4 +1,9 @@
+const { echapperHtml } = require('../../utils/echapperHtml');
+
 module.exports = ({ nom, prenom, resetLink }) => {
+  nom = echapperHtml(nom);
+  prenom = echapperHtml(prenom);
+  resetLink = echapperHtml(resetLink);
   return `
   <!DOCTYPE html>
   <html lang="fr">

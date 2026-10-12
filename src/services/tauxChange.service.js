@@ -16,8 +16,10 @@ class TauxChangeService {
     const taux = await TauxChange.findByPk(id);
     if (!taux) return { success: false, message: 'Taux de change non trouvé' };
 
-    const valeur = Number(data.valeur);
-    if (!valeur || valeur <= 0) {
+    // Nombre fini strictement positif (avant : « Infinity » ou true passaient).
+    const brute = data ? data.valeur : undefined;
+    const valeur = (typeof brute === 'number' || (typeof brute === 'string' && brute.trim() !== '')) ? Number(brute) : NaN;
+    if (!Number.isFinite(valeur) || valeur <= 0) {
       return { success: false, message: 'La valeur du taux doit être un nombre positif' };
     }
 

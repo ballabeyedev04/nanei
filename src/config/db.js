@@ -10,6 +10,9 @@ const sequelize = new Sequelize(
   process.env.DB_PASSWORD,
   {
     host: process.env.DB_HOST,
+    // DB_PORT est documenté dans .env.example mais n'était pas transmis :
+    // toute base hors du port 5432 était injoignable.
+    port: process.env.DB_PORT ? Number(process.env.DB_PORT) : undefined,
     dialect: 'postgres',
     logging: false,
     dialectOptions: sslEnabled

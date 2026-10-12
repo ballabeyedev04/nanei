@@ -1,4 +1,6 @@
 const Paiement = require('../../models/paiement.model');
+const { fn, col } = require('sequelize');
+const { paginer, avecPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const { Colis, Utilisateur } = require('../../models');
 const WaveService = require('../payment/wave.service');
@@ -25,19 +27,47 @@ async function montantEnXof(prixEur) {
   return { montantXof: Math.round(Number(prixEur) * Number(taux)), taux };
 }
 
+/** États définitifs : un webhook (rejoué, tardif ou contradictoire) ne les modifie plus. */
+const STATUTS_DEFINITIFS = ['paye', 'rembourse'];
+
+// Référence de paiement = UUID. Une autre valeur ne correspond à aucun
+// paiement : on l'ignore au lieu de laisser Postgres lever une erreur (500,
+// que l'opérateur rejouerait indéfiniment).
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Le montant annoncé par l'opérateur (s'il en annonce un) correspond-il au
+ * montant attendu en XOF ? Un webhook « payé » pour un autre montant n'est
+ * pas une preuve de paiement de CE colis.
+ */
+async function montantConforme(montantAnnonce, paiement, colis) {
+  if (montantAnnonce === undefined || montantAnnonce === null || montantAnnonce === '') return true;
+  const { montantXof } = await montantEnXof(colis?.prix ?? paiement.prixTotal);
+  return Math.round(Number(montantAnnonce)) === montantXof;
+}
+
 class ClientPaiementService {
 
   /** Liste les paiements de l'utilisateur connecté */
-  static async mesPaiements(userId) {
-    const paiements = await Paiement.findAll({
-      where: { payeurId: userId },
+  // Pagination facultative (?page=&limit=) : sans paramètre, liste complète.
+  static async mesPaiements(userId, query = {}) {
+    const STATUTS = ['en_attente', 'en_cours', 'paye', 'echoue', 'rembourse'];
+    const where = { payeurId: userId };
+    if (query.statut && query.statut !== 'tous') {
+      if (!STATUTS.includes(query.statut)) {
+        return { success: false, status: 400, message: `Statut invalide (${STATUTS.join(', ')})` };
+      }
+      where.statut = query.statut;
+    }
+    const { lignes: paiements, pagination } = await paginer(Paiement, {
+      where,
       include: [{
         model: Colis,
         as: 'colis',
         attributes: ['id', 'reference', 'prix', 'poids', 'destination', 'type_colis', 'statut'],
       }],
       order: [['created_at', 'DESC']],
-    });
+    }, query);
     // Les colonnes DECIMAL (prixTotal, montantPaye, colis.prix, colis.poids)
     // sont renvoyées en String par Sequelize/pg pour préserver la précision —
     // le mobile fait un cast strict `as num` dessus et crashe ("type 'String'
@@ -46,15 +76,27 @@ class ClientPaiementService {
     // stockage interne qui reste en DECIMAL.
     const data = paiements.map((p) => {
       const json = p.toJSON();
-      json.prixTotal = Number(json.prixTotal);
-      json.montantPaye = Number(json.montantPaye);
+      // Charge brute renvoyée par l'opérateur (données techniques, parfois
+      // personnelles) : jamais transmise au client.
+      delete json.webhookPayload;
+      json.prixTotal = json.prixTotal != null ? Number(json.prixTotal) : null;
+      json.montantPaye = json.montantPaye != null ? Number(json.montantPaye) : null;
       if (json.colis) {
         json.colis.prix = json.colis.prix != null ? Number(json.colis.prix) : json.colis.prix;
         json.colis.poids = json.colis.poids != null ? Number(json.colis.poids) : json.colis.poids;
       }
       return json;
     });
-    return { success: true, data };
+    // Compteurs sur TOUS les paiements du client (toutes pages, sans filtre)
+    const parStatut = await Paiement.findAll({
+      where: { payeurId: userId },
+      attributes: ['statut', [fn('COUNT', col('id')), 'nombre']],
+      group: ['statut'],
+      raw: true,
+    });
+    const par_statut = { en_attente: 0, en_cours: 0, paye: 0, echoue: 0, rembourse: 0, total: 0 };
+    for (const l of parStatut) { const n = Number(l.nombre) || 0; par_statut[l.statut] = n; par_statut.total += n; }
+    return avecPagination({ success: true, data, par_statut }, pagination);
   }
 
   /**
@@ -210,12 +252,20 @@ class ClientPaiementService {
 
   /** Webhook Wave */
   static async webhookWave(payload) {
-    const { client_reference, checkout_status } = payload;
+    const { client_reference, checkout_status } = payload || {};
+    if (!client_reference || !UUID.test(String(client_reference))) return;
     const paiement = await Paiement.findByPk(client_reference);
     if (!paiement) return;
+    // Avant : un webhook « error » rejoué après le paiement repassait un
+    // paiement payé (ou remboursé) en « echoue ».
+    if (STATUTS_DEFINITIFS.includes(paiement.statut)) return;
 
     if (checkout_status === 'complete') {
       const colis = await Colis.findByPk(paiement.colisId);
+      if (!(await montantConforme(payload.amount, paiement, colis))) {
+        logger.warn('Webhook Wave : montant différent du montant attendu, paiement non validé', { paiement_id: paiement.id });
+        return;
+      }
       await paiement.update({
         statut: 'paye',
         montantPaye: colis?.prix ?? paiement.prixTotal,
@@ -228,12 +278,18 @@ class ClientPaiementService {
 
   /** Webhook Orange Money */
   static async webhookOrangeMoney(payload) {
-    const { order_id, status } = payload;
+    const { order_id, status } = payload || {};
+    if (!order_id || !UUID.test(String(order_id))) return;
     const paiement = await Paiement.findByPk(order_id);
     if (!paiement) return;
+    if (STATUTS_DEFINITIFS.includes(paiement.statut)) return;
 
     if (status === 'SUCCESS') {
       const colis = await Colis.findByPk(paiement.colisId);
+      if (!(await montantConforme(payload.amount, paiement, colis))) {
+        logger.warn('Webhook Orange Money : montant différent du montant attendu, paiement non validé', { paiement_id: paiement.id });
+        return;
+      }
       await paiement.update({
         statut: 'paye',
         montantPaye: colis?.prix ?? paiement.prixTotal,

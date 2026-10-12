@@ -1,28 +1,43 @@
 const { Op } = require('sequelize');
+const { paginer, motifRecherche, avecPagination } = require('../../utils/pagination');
 const Utilisateur = require('../../models/utilisateur.model');
 const bcrypt = require('bcrypt');
+const {
+    email: emailSchema, motDePasse: motDePasseSchema, nom: nomSchema, prenom: prenomSchema, telephone: telephoneSchema,
+} = require('../../validations/common');
 
 class GestionAdminService {
 
     // ===================== LISTE ADMINS =====================
-    static async listeAdmins(currentAdminId) {
+    // Query : page, limit (pagination facultative), q (nom, prénom, e-mail, téléphone)
+    static async listeAdmins(currentAdminId, query = {}) {
         try {
-            const where = { role: 'Admin' };
+            const motif = motifRecherche(query.q);
+            const where = { role: 'Admin', ...(motif ? { [Op.or]: [
+                { nom: { [Op.iLike]: motif } },
+                { prenom: { [Op.iLike]: motif } },
+                { email: { [Op.iLike]: motif } },
+                { telephone: { [Op.iLike]: motif } },
+            ] } : {}) };
             // L'admin connecté ne doit pas se voir lui-même dans la liste — il
             // gère son propre compte depuis "Mon profil", pas depuis cette page.
             if (currentAdminId) {
                 where.id = { [Op.ne]: currentAdminId };
             }
 
-            const admins = await Utilisateur.findAll({ where });
+            const { lignes: admins, pagination } = await paginer(Utilisateur, {
+                where,
+                attributes: { exclude: Utilisateur.CHAMPS_PRIVES },
+                order: [['created_at', 'DESC']],
+            }, query);
 
-            return {
+            return avecPagination({
                 success: true,
                 message: admins.length
                     ? "Liste des admins récupérée avec succès"
                     : "Aucun admin trouvé",
                 data: admins
-            };
+            }, pagination);
 
         } catch (error) {
             return {
@@ -43,7 +58,28 @@ class GestionAdminService {
                 };
             }
 
-            const emailClean = email.trim().toLowerCase();
+            const emailClean = String(email).trim().toLowerCase();
+            const { error: erreurEmail } = emailSchema.validate(emailClean);
+            if (erreurEmail) {
+                return { success: false, message: "Adresse e-mail invalide" };
+            }
+            if (!nom || !String(nom).trim() || !prenom || !String(prenom).trim()) {
+                return { success: false, message: "Le nom et le prénom sont obligatoires" };
+            }
+            // Mêmes règles qu'à l'inscription (validations/common.js) : 2 à 50
+            // caractères pour le nom et le prénom, format de téléphone.
+            nom = String(nom).trim();
+            prenom = String(prenom).trim();
+            if (nomSchema.validate(nom).error || prenomSchema.validate(prenom).error) {
+                return { success: false, message: "Le nom et le prénom doivent contenir entre 2 et 50 caractères" };
+            }
+            // Téléphone vide → NULL : la colonne est UNIQUE, et "" enregistré
+            // tel quel faisait échouer la création du 2e admin sans téléphone.
+            telephone = telephone && String(telephone).trim() ? String(telephone).trim() : null;
+            if (telephone && telephoneSchema.validate(telephone).error) {
+                return { success: false, message: "Numéro de téléphone invalide" };
+            }
+            adresse = adresse ? String(adresse).trim() : '';
 
             // Vérifier email unique
             const emailExist = await Utilisateur.findOne({
@@ -71,11 +107,13 @@ class GestionAdminService {
                 }
             }
 
-            // validation password
-            if (mot_de_passe.length < 8) {
+            // Même règle que l'inscription et le changement de mot de passe
+            // (avant : 8 caractères seulement, sans autre exigence).
+            const { error: erreurMdp } = motDePasseSchema.validate(mot_de_passe);
+            if (erreurMdp) {
                 return {
                     success: false,
-                    message: "Le mot de passe doit contenir au moins 8 caractères"
+                    message: "Le mot de passe doit contenir au moins 8 caractères, une majuscule, une minuscule et un chiffre"
                 };
             }
 
@@ -112,9 +150,12 @@ class GestionAdminService {
         try {
             const utilisateur = await Utilisateur.findByPk(id);
 
-            if (!utilisateur) {
+            // Seuls les comptes Admin passent par cette route (les clients :
+            // PATCH /admin/activer-utilisateurs/:id).
+            if (!utilisateur || utilisateur.role !== 'Admin') {
                 return {
                     success: false,
+                    status: 404,
                     message: "Admin introuvable"
                 };
             }
@@ -131,22 +172,46 @@ class GestionAdminService {
         } catch (error) {
             return {
                 success: false,
-                message: "Erreur lors de l'activation",
-                error: error.message
+                status: 500,
+                message: "Erreur lors de l'activation"
             };
         }
     }
 
     // ===================== DÉSACTIVER ADMIN =====================
-    static async desactiverAdmin(id) {
+    static async desactiverAdmin(id, currentAdminId) {
         try {
             const utilisateur = await Utilisateur.findByPk(id);
 
-            if (!utilisateur) {
+            if (!utilisateur || utilisateur.role !== 'Admin') {
                 return {
                     success: false,
+                    status: 404,
                     message: "Admin introuvable"
                 };
+            }
+
+            // Garde-fous : un admin ne peut pas se désactiver lui-même, et le
+            // dernier admin actif ne peut pas être désactivé (sinon plus
+            // personne ne peut accéder au back-office).
+            if (currentAdminId && String(utilisateur.id) === String(currentAdminId)) {
+                return {
+                    success: false,
+                    status: 400,
+                    message: "Vous ne pouvez pas désactiver votre propre compte"
+                };
+            }
+            if (utilisateur.statut === 'actif') {
+                const autresAdminsActifs = await Utilisateur.count({
+                    where: { role: 'Admin', statut: 'actif', id: { [Op.ne]: utilisateur.id } }
+                });
+                if (autresAdminsActifs === 0) {
+                    return {
+                        success: false,
+                        status: 400,
+                        message: "Impossible de désactiver le dernier administrateur actif"
+                    };
+                }
             }
 
             utilisateur.statut = 'inactif';
@@ -161,8 +226,8 @@ class GestionAdminService {
         } catch (error) {
             return {
                 success: false,
-                message: "Erreur lors de la désactivation",
-                error: error.message
+                status: 500,
+                message: "Erreur lors de la désactivation"
             };
         }
     }
@@ -191,15 +256,17 @@ class GestionAdminService {
     // ===================== RECHERCHER ADMIN =====================
     static async rechercherAdmin({ nom, prenom, email }) {
         try {
+            // Insensible à la casse, % et _ saisis pris littéralement (avant :
+            // LIKE brut, « dupont » ne trouvait pas « Dupont »).
             const where = { role: 'Admin' };
 
-            if (nom) where.nom = { [Op.like]: `%${nom}%` };
-            if (prenom) where.prenom = { [Op.like]: `%${prenom}%` };
-            if (email) where.email = { [Op.like]: `%${email}%` };
+            if (motifRecherche(nom)) where.nom = { [Op.iLike]: motifRecherche(nom) };
+            if (motifRecherche(prenom)) where.prenom = { [Op.iLike]: motifRecherche(prenom) };
+            if (motifRecherche(email)) where.email = { [Op.iLike]: motifRecherche(email) };
 
             const admins = await Utilisateur.findAll({
                 where,
-                attributes: { exclude: ['mot_de_passe'] },
+                attributes: { exclude: Utilisateur.CHAMPS_PRIVES },
                 order: [['created_at', 'DESC']]
             });
 

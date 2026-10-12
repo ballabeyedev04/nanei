@@ -46,5 +46,5 @@ router.get(
   controller.rechercherUtilisateur
 );
 
-router.get('/hello', controller.hello);
+// (route de test publique GET /hello retirée : sans authentification dans le routeur admin)
 module.exports = router;

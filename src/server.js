@@ -12,6 +12,12 @@ const seedAdmin = require("./seed/seedAdmin");
 
 const isProd = process.env.NODE_ENV === 'production';
 
+// Configuration attendue en production : avertir au démarrage plutôt que de
+// découvrir le problème quand un admin demande un nouveau mot de passe.
+if (isProd && !process.env.FRONTEND_URL) {
+  logger.error("FRONTEND_URL non défini : les liens « mot de passe oublié » de l'admin utiliseront la première origine HTTPS de CORS_ORIGIN, ou ne seront pas envoyés. Définir FRONTEND_URL=https://<adresse de l'admin> dans .env");
+}
+
 // ── Handlers process non capturées ──────────────────────────────────────────
 // Sans ça, une exception/rejet non intercepté ailleurs dans le code plante
 // le process sans log exploitable (ou pire, le laisse dans un état

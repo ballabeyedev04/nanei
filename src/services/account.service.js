@@ -1,4 +1,5 @@
 const Utilisateur = require('../models/utilisateur.model');
+const AuthService = require('./auth.service');
 const bcrypt      = require('bcrypt');
 const sequelize   = require('../config/db');
 const logger      = require('../config/logger');
@@ -33,9 +34,15 @@ class AccountService {
       }
 
       utilisateur.mot_de_passe = await bcrypt.hash(newPassword, bcryptConfig.saltRounds);
+      // Toutes les autres sessions sont coupées (jeton volé, autre appareil).
+      // La session en cours reçoit de NOUVEAUX jetons dans la réponse.
+      await AuthService.revoquerSessions(utilisateur);
       await utilisateur.save();
 
-      return { message: "Mot de passe modifié avec succès." };
+      const token = AuthService.genererJetonAcces(utilisateur);
+      const refreshToken = await AuthService.genererRefreshToken(utilisateur);
+
+      return { message: "Mot de passe modifié avec succès.", token, refreshToken };
     } catch (error) {
       logger.error('Erreur changePassword', { error: error.message, stack: error.stack });
       throw error;
@@ -57,6 +64,17 @@ class AccountService {
         const exist = await Utilisateur.findOne({ where: { email }, transaction: t });
         if (exist) { await t.rollback(); return { error: "Cet email est déjà utilisé" }; }
         utilisateur.email = email;
+      }
+
+      // Téléphone vidé : avant, ignoré en silence (réponse 200 trompeuse).
+      // Un admin peut le retirer ; pour un client, c'est un identifiant de
+      // connexion obligatoire.
+      if (telephone === '' && utilisateur.telephone) {
+        if (utilisateur.role !== 'Admin') {
+          await t.rollback();
+          return { error: "Le numéro de téléphone est obligatoire" };
+        }
+        utilisateur.telephone = null;
       }
 
       if (telephone && telephone !== utilisateur.telephone) {

@@ -14,12 +14,22 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors(corsConfig));
 
-app.use(express.json({ limit: '5mb' }));
+// Corps brut conservé (req.rawBody) : la signature des webhooks Wave /
+// Orange Money se vérifie sur les octets reçus, pas sur un JSON reconstruit.
+app.use(express.json({
+  limit: '5mb',
+  verify: (req, res, buf) => {
+    if (req.originalUrl && req.originalUrl.includes('/webhook')) req.rawBody = Buffer.from(buf);
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 // Quota par utilisateur connecté (fallback IP si non authentifié) — évite
 // que des utilisateurs mobiles partageant la même IP opérateur épuisent
 // ensemble un seul quota global (cause des 429 "trop d'utilisation").
 app.use(authenticatedRateLimit);
+
+// Aucune erreur technique (SQL, pile…) dans les réponses JSON >= 400
+app.use(require('./middlewares/reponsesErreur.middleware'));
 
 // Request logger
 const requestLogger = require('./middlewares/requestLogger.middleware');
@@ -77,6 +87,11 @@ require('./jobs/alertes.job');
 require('./jobs/rapport.job');
 
 // Serveur fichiers statiques pour les uploads
+// Les rapports financiers ne sont JAMAIS publics : ils ont été déplacés dans un
+// dossier privé (utils/rapportsStockage.js) et ne se téléchargent que par
+// GET /nanei/admin/rapports/:filename (jeton admin). Cette garde bloque
+// l'ancienne adresse si un fichier y traînait encore.
+app.use('/uploads/rapports', (req, res) => res.status(404).json({ success: false, message: 'Fichier introuvable' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // SÉCURITÉ: Healthcheck pour orchestrateurs (Docker, K8s)

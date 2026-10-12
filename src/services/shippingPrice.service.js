@@ -2,6 +2,7 @@ const ShippingPrice = require('../models/shippingPrice.model');
 const Country = require('../models/country.model');
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
+const { erreurNombres } = require('../utils/validationNombres');
 
 class ShippingPriceService {
   static async getShippingPrices(filters = {}) {
@@ -91,7 +92,14 @@ class ShippingPriceService {
         };
       }
 
-      if (minWeight >= maxWeight) {
+      const erreur = erreurNombres([
+        ['Poids minimum', minWeight], ['Poids maximum', maxWeight, { strict: true }],
+        ['Prix / kg', pricePerKg, { strict: true }],
+      ]);
+      if (erreur) return { success: false, message: erreur };
+
+      // Comparaison NUMÉRIQUE (avant : « 10 » >= « 9 » était faux entre chaînes).
+      if (Number(minWeight) >= Number(maxWeight)) {
         return {
           success: false,
           message: 'Le poids minimum doit être inférieur au poids maximum',
@@ -180,7 +188,16 @@ class ShippingPriceService {
         }
       }
 
-      if (minWeight !== undefined && maxWeight !== undefined && minWeight >= maxWeight) {
+      const erreur = erreurNombres([
+        ['Poids minimum', minWeight], ['Poids maximum', maxWeight, { strict: true }],
+        ['Prix / kg', pricePerKg, { strict: true }],
+      ]);
+      if (erreur) return { success: false, message: erreur };
+      if (type !== undefined && !['aérien', 'maritime'].includes(type)) {
+        return { success: false, message: 'Type invalide. Doit être "aérien" ou "maritime"' };
+      }
+
+      if (Number(minWeight ?? price.minWeight) >= Number(maxWeight ?? price.maxWeight)) {
         return {
           success: false,
           message: 'Le poids minimum doit être inférieur au poids maximum',
@@ -256,6 +273,12 @@ class ShippingPriceService {
       if (!countryId || minWeight === undefined || maxWeight === undefined || aerienPricePerKg === undefined || maritimePricePerKg === undefined) {
         return { success: false, message: 'Tous les champs sont obligatoires' };
       }
+      const erreur = erreurNombres([
+        ['Poids minimum', minWeight], ['Poids maximum', maxWeight, { strict: true }],
+        ['Prix aérien / kg', aerienPricePerKg, { strict: true }],
+        ['Prix maritime / kg', maritimePricePerKg, { strict: true }],
+      ]);
+      if (erreur) return { success: false, message: erreur };
       if (parseFloat(minWeight) >= parseFloat(maxWeight)) {
         return { success: false, message: 'Le poids minimum doit être inférieur au poids maximum' };
       }

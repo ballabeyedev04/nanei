@@ -2,7 +2,6 @@ const AccountService = require('../services/account.service');
 const logger = require('../config/logger');
 const formatUser = require('../utils/formatUser');
 const User = require('../models/utilisateur.model');
-const { v4: uuidv4 } = require('uuid');
 const { uploadBufferToR2 } = require('../middlewares/r2Upload.middleware');
 
 // ── GET /me ───────────────────────────────────────────────────────────────────
@@ -29,7 +28,6 @@ exports.updateProfile = async (req, res) => {
     email,
     telephone,
     adresse,
-    carte_identite_national_num
   } = req.body;
 
   try {
@@ -40,13 +38,14 @@ exports.updateProfile = async (req, res) => {
 
     const { utilisateur, message, error } = await AccountService.updateProfile({
       userId,
-      data: { nom, prenom, email, telephone, adresse, photoProfil, carte_identite_national_num }
+      data: { nom, prenom, email, telephone, adresse, photoProfil }
     });
 
     if (error) return res.status(400).json({ message: error });
 
     return res.status(200).json({ message, utilisateur: formatUser(utilisateur) });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: err.message });
     logger.error('Erreur dans updateProfile', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ message: 'Erreur serveur lors de la modification du profil' });
   }
@@ -72,7 +71,9 @@ exports.changePassword = async (req, res) => {
       return res.status(400).json({ message: result.error });
     }
 
-    return res.status(200).json({ message: result.message });
+    // Les autres sessions sont révoquées : le client doit remplacer ses
+    // jetons par ceux-ci (sinon il sera déconnecté au prochain appel).
+    return res.status(200).json({ message: result.message, token: result.token, refreshToken: result.refreshToken });
   } catch (error) {
     logger.error('Erreur dans changePassword', { error: error.message, stack: error.stack, user_id: req.user?.id });
     return res.status(500).json({ message: "Erreur serveur lors du changement de mot de passe" });
@@ -100,7 +101,7 @@ exports.deleteAccount = async (req, res) => {
     const RgpdService = require('../services/rgpd.service');
     const userId = req.user.id;
 
-    // SÉCURITÉ: Hard delete conforme RGPD (pas d'anonymisation)
+    // RGPD : anonymisation du compte + suppression des données liées (voir rgpd.service.js)
     const result = await RgpdService.deleteUserAccount(userId);
 
     if (!result.success) {

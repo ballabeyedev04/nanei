@@ -3,13 +3,21 @@
  * Calcule le CA du mois précédent, génère un PDF et l'envoie par email à l'admin.
  */
 const cron = require('node-cron');
+const { RAPPORTS_DIR, preparerDossierRapports } = require('../utils/rapportsStockage');
+const { echapperHtml } = require('../utils/echapperHtml');
 const path = require('path');
 const fs = require('fs');
 const { Op, fn, col, literal } = require('sequelize');
 const htmlToPdf = require('../utils/htmlToPdf');
-const { Paiement, Colis, Utilisateur } = require('../models');
+// Paiement n'est pas exporté par models/index.js : import direct (sinon
+// Paiement.findAll plantait et aucun rapport ne pouvait être généré).
+const Paiement = require('../models/paiement.model');
+const { Colis } = require('../models');
 const { sendEmail } = require('../services/resend.service');
 const logger = require('../config/logger');
+
+// Montants du rapport : en euros (prix des colis), 2 décimales.
+const formatEUR = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Number(n) || 0);
 
 async function genererRapportMensuel() {
   // Calcul des dates du mois précédent
@@ -28,7 +36,16 @@ async function genererRapportMensuel() {
     include: [{ model: Colis, as: 'colis', attributes: ['destination'] }],
   });
 
-  const caTotal = paiements.reduce((sum, p) => sum + (p.montantPaye || 0), 0);
+  // montantPaye est une colonne DECIMAL : Postgres la renvoie en CHAÎNE
+  // ("45.50"). Sans conversion, `0 + "45.50" + "12.00"` concaténait les
+  // chaînes et le rapport affichait « NaN ». Montants en EUR (prix du colis) ;
+  // le montant XOF n'est calculé qu'au moment du débit chez l'opérateur.
+  const montant = (p) => {
+    const n = Number(p.montantPaye ?? p.prixTotal ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const arrondi = (n) => Math.round(n * 100) / 100;
+  const caTotal = arrondi(paiements.reduce((sum, p) => sum + montant(p), 0));
   const nbColis = paiements.length;
 
   // Regroupement par pays/destination
@@ -37,18 +54,16 @@ async function genererRapportMensuel() {
     const dest = p.colis?.destination || 'Inconnu';
     if (!parPays[dest]) parPays[dest] = { nombre: 0, ca: 0 };
     parPays[dest].nombre += 1;
-    parPays[dest].ca += p.montantPaye || 0;
+    parPays[dest].ca = arrondi(parPays[dest].ca + montant(p));
   });
 
   const lignesPays = Object.entries(parPays)
     .sort((a, b) => b[1].ca - a[1].ca)
     .map(([dest, d]) => `<tr>
-      <td style="padding:6px 12px;border-bottom:1px solid #EEE;">${dest}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #EEE;">${echapperHtml(dest)}</td>
       <td style="padding:6px 12px;border-bottom:1px solid #EEE;text-align:center;">${d.nombre}</td>
-      <td style="padding:6px 12px;border-bottom:1px solid #EEE;text-align:right;">${new Intl.NumberFormat('fr-FR').format(d.ca)} FCFA</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #EEE;text-align:right;">${formatEUR(d.ca)}</td>
     </tr>`).join('');
-
-  const formatXOF = (n) => new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' FCFA';
 
   const html = `<!DOCTYPE html>
 <html lang="fr">
@@ -81,8 +96,8 @@ async function genererRapportMensuel() {
 
   <div class="kpi-row">
     <div class="kpi">
-      <div class="kpi-val">${formatXOF(caTotal)}</div>
-      <div class="kpi-label">Chiffre d'affaires</div>
+      <div class="kpi-val">${formatEUR(caTotal)}</div>
+      <div class="kpi-label">Chiffre d'affaires (EUR)</div>
     </div>
     <div class="kpi">
       <div class="kpi-val">${nbColis}</div>
@@ -120,8 +135,9 @@ async function genererRapportMensuel() {
   });
 
   // Sauvegarder le fichier
-  const rapportsDir = path.join(__dirname, '../uploads/rapports');
-  if (!fs.existsSync(rapportsDir)) fs.mkdirSync(rapportsDir, { recursive: true });
+  // Dossier privé (jamais servi en statique) — voir utils/rapportsStockage.js
+  preparerDossierRapports();
+  const rapportsDir = RAPPORTS_DIR;
 
   const filename = `rapport-${debut.getFullYear()}-${String(debut.getMonth() + 1).padStart(2, '0')}.pdf`;
   const filePath = path.join(rapportsDir, filename);
@@ -142,8 +158,6 @@ cron.schedule('0 6 1 * *', async () => {
       return;
     }
 
-    const formatXOF = (n) => new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' FCFA';
-
     await sendEmail({
       to: adminEmail,
       subject: `[Nanei] Rapport mensuel — ${moisLabel}`,
@@ -151,7 +165,7 @@ cron.schedule('0 6 1 * *', async () => {
         <h2 style="color:#FF7A00;">Rapport mensuel — ${moisLabel}</h2>
         <p>Le rapport du mois de <strong>${moisLabel}</strong> est disponible.</p>
         <ul>
-          <li>CA total : <strong>${formatXOF(caTotal)}</strong></li>
+          <li>CA total : <strong>${formatEUR(caTotal)}</strong></li>
           <li>Nombre de colis : <strong>${nbColis}</strong></li>
         </ul>
         <p>Le fichier PDF est disponible dans l'interface d'administration.</p>

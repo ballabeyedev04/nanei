@@ -76,7 +76,7 @@ Il n’y a **pas d’enveloppe commune**. On rencontre, selon la route :
 | 404 | Ressource introuvable | `{ "success": false, "message": "… introuvable" }` |
 | 409 | Doublon (avis déjà donné) | `{ "success": false, "message": "…" }` |
 | 429 | Limite de débit dépassée | `{ "message": "Trop de …" }` (en-têtes standard `RateLimit-*`) |
-| 500 | Erreur interne | `{ "message": "Erreur serveur…", "erreur": "<détail technique>" }` ou `{ "success": false, "message": "Erreur serveur" }` |
+| 500 | Erreur interne | `{ "message": "Erreur serveur…" }` ou `{ "success": false, "message": "Erreur serveur" }` — les champs `error` / `erreur` et tout détail technique (SQL, pile) sont **retirés** de toute réponse ≥ 500 (`middlewares/reponsesErreur.middleware.js`) |
 | 400 | Fichier refusé à l’upload (type non autorisé, trop de fichiers) | `{ "success": false, "message": "Type de fichier non autorisé", "error": "…" }` |
 | 413 | Fichier trop volumineux | `{ "success": false, "message": "Fichier trop volumineux", "error": "…" }` |
 | 500 | Erreur non interceptée | `{ "success": false, "message": "Erreur interne du serveur", "error": "Erreur interne du serveur" }` |
@@ -92,17 +92,28 @@ Il n’y a **pas d’enveloppe commune**. On rencontre, selon la route :
 5. `POST /auth/logout` avec `{ refreshToken }` révoque ce refresh token. Le jeton d’accès reste valide jusqu’à son expiration.
 6. Le middleware `auth` recharge l’utilisateur en base à chaque requête : compte supprimé → 404, compte `inactif` → 403.
 
+### Pagination des listes
+
+Toutes les routes de liste acceptent `?page=N&limit=M` (page ≥ 1 ; `limit` 20 par défaut, 100 maximum ; `utils/pagination.js`).
+
+- **Avec `page` ou `limit`** : la liste est paginée et la réponse contient en plus `"pagination": { "page": 2, "limit": 20, "total": 137, "pages": 7 }` (`pages` ≥ 1).
+- **Sans ces paramètres** : liste complète, réponse identique à avant. Les versions de l’app mobile déjà installées continuent de fonctionner.
+
+La clé de la liste ne change pas (`colis`, `data`, `avis`, `reclamations`, `logs`, `rapports`, `contacts`…). Les recherches (`q`) et filtres (`statut`, `note`) sont appliqués **côté serveur, avant la pagination**.
+
 ### Limitation de débit
 
 | Limite | Portée | Routes |
 |---|---|---|
 | 300 requêtes / 15 min | par utilisateur (ID du jeton), sinon par IP | **toutes** les routes |
-| 5 requêtes / 15 min | par IP | `POST /auth/login`, `POST /auth/refresh`, `POST /auth/oublier-password`, `POST /auth/reset-password` |
+| 5 requêtes / 15 min | par IP | `POST /auth/login` (compteur propre) |
+| 30 requêtes / 15 min | par IP | `POST /auth/refresh` (compteur propre) |
+| 5 requêtes / 15 min | par IP | `POST /auth/oublier-password`, `POST /auth/reset-password` (compteur commun aux mots de passe oubliés, mobile et admin) |
 | 3 requêtes / 15 min | par e-mail ciblé | `POST /auth/oublier-password`, `POST /auth/reset-password` |
 | 20 requêtes / 15 min | par IP | `PUT /account/modifier-profil`, `PUT /account/change-password`, `DELETE /account` |
 | 30 requêtes / 15 min | par IP | `GET /suivi/:reference` |
 
-> ⚠️ `POST /auth/refresh` partage la limite de **5 / 15 min par IP** avec la connexion. Plusieurs téléphones derrière la même IP d’opérateur (NAT) peuvent donc se bloquer mutuellement sur le rafraîchissement.
+> Chaque limiteur a **son propre compteur** : renouveler la session ne consomme pas les essais de connexion (`middlewares/rateLimit.middleware.js`).
 
 ### Types et formats
 
@@ -165,7 +176,7 @@ Les fichiers sont envoyés vers Cloudflare R2 ; l’URL publique est stockée. U
 |---|---|---|
 | POST | `/nanei/auth/register` | public |
 | POST | `/nanei/auth/login` | public · 5 / 15 min / IP |
-| POST | `/nanei/auth/refresh` | public · 5 / 15 min / IP |
+| POST | `/nanei/auth/refresh` | public · 30 / 15 min / IP |
 | POST | `/nanei/auth/logout` | public |
 | POST | `/nanei/auth/oublier-password` | public · 5 / 15 min / IP + 3 / 15 min / e-mail |
 | POST | `/nanei/auth/reset-password` | public · 5 / 15 min / IP + 3 / 15 min / e-mail |
@@ -237,7 +248,7 @@ Crée un compte `Particulier`. Si un compte **destinataire léger** (statut `ina
 }
 ```
 
-**Erreurs :** 400 « Identifiant ou mot de passe incorrect » · 400 « Compte inactif » (compte destinataire léger pas encore revendiqué, ou compte désactivé) · 400 `Données invalides` · 429 « Trop de tentatives. Veuillez réessayer dans 15 minutes. » · 500.
+**Erreurs :** 400 « Identifiant ou mot de passe incorrect » · 400 « Compte désactivé. Contactez le support. » (seulement si le mot de passe est correct ; sinon « Identifiant ou mot de passe incorrect », que le compte existe ou non) · 400 `Données invalides` · 429 « Trop de tentatives. Veuillez réessayer dans 15 minutes. » · 500.
 
 > Les identifiants invalides répondent **400** (et non 401).
 
@@ -274,9 +285,9 @@ Envoie un code à 6 chiffres par e-mail (valide **10 minutes**).
 
 **Corps :** `{ "email": "…" }` (obligatoire, format e-mail).
 
-**Réponse 200 :** `{ "success": true, "message": "Si un compte existe avec cet email, un code de réinitialisation a été envoyé." }` (même réponse si l’e-mail est inconnu).
+**Réponse 200 :** `{ "success": true, "message": "Si un compte existe avec cet email, un code de réinitialisation a été envoyé." }` (même réponse, sans envoi, si l’e-mail est inconnu, appartient à un administrateur ou à un compte désactivé).
 
-**Erreurs :** 400 `{ success: false, message: "Action non autorisée" }` (compte admin) · 400 `{ success: false, message: "Impossible d'envoyer l'email pour le moment. Veuillez réessayer plus tard." }` · 429.
+**Erreurs :** 400 `{ success: false, message: "Impossible d'envoyer l'email pour le moment. Veuillez réessayer plus tard." }` · 429.
 
 ---
 
@@ -292,7 +303,7 @@ Envoie un code à 6 chiffres par e-mail (valide **10 minutes**).
 
 **Réponse 200 :** `{ "success": true, "message": "Mot de passe réinitialisé avec succès" }`.
 
-**Erreurs (400, `{ success: false, message }`) :** « Compte introuvable » · « Aucun code de réinitialisation trouvé. Veuillez refaire la demande. » · « Code expiré. Veuillez refaire la demande. » · « Code incorrect (N tentatives restantes). » · « Trop de tentatives. Réessayez dans 15 minutes. » (blocage de 15 min après 3 échecs) · `Données invalides` (+ `details`). 429 possible.
+**Erreurs (400, `{ success: false, message }`) :** « Aucun code de réinitialisation trouvé. Veuillez refaire la demande. » (aussi pour un e-mail inconnu : pas d’énumération de comptes) · « Code expiré. Veuillez refaire la demande. » · « Code incorrect (N tentatives restantes). » · « Trop de tentatives. Réessayez dans 15 minutes. » (blocage de 15 min après 3 échecs) · `Données invalides` (+ `details`). 429 possible.
 
 > Le message « Code incorrect » contient déjà le nombre d’essais restants : le mobile l’affiche tel quel.
 
@@ -346,7 +357,9 @@ Envoie un code à 6 chiffres par e-mail (valide **10 minutes**).
 | `oldPassword` | string | **oui** | mot de passe actuel |
 | `newPassword` | string | **oui** | 8 à 128 car., 1 minuscule, 1 majuscule, 1 chiffre |
 
-**Réponse 200 :** `{ "message": "Mot de passe modifié avec succès." }`.
+**Réponse 200 :** `{ "message": "Mot de passe modifié avec succès.", "token": "…", "refreshToken": "…" }`.
+
+> **Toutes les autres sessions sont coupées** (autres appareils, jeton volé) : `passwordChangedAt` mis à jour et refresh tokens révoqués. La session en cours reçoit de nouveaux jetons : le mobile les enregistre (`profils_page.dart`, `TokenService.setToken` / `setRefreshToken`). Une version de l’app qui ne les enregistre pas est déconnectée au prochain appel.
 
 **Erreurs :** 400 « Mot de passe actuel incorrect. » · 400 `Données invalides` · 429 · 500.
 
@@ -364,9 +377,14 @@ Les changements de statut d’un colis faits par l’admin déclenchent une **no
 
 #### `DELETE /nanei/account`
 
-Suppression définitive du compte (RGPD) : notifications, messages, paiements, etc. sont supprimés.
+Suppression du compte (RGPD), par **anonymisation**, en une transaction :
+- nom, prénom, e-mail, téléphone, adresse, photo et jeton push effacés ; mot de passe remplacé par une valeur aléatoire ; compte désactivé et marqué supprimé ;
+- notifications, contacts favoris, avis et réclamations de l’utilisateur supprimés ; refresh tokens supprimés ;
+- colis et paiements **conservés** (obligation comptable, et un colis concerne aussi son destinataire), rattachés à un compte anonyme.
 
-**Réponse 200 :** `{ "message": "…" }`. **Erreurs :** 400 `{ message }` · 429 · 500.
+**Réponse 200 :** `{ "message": "Compte supprimé : vos données personnelles ont été effacées définitivement" }`. **Erreurs :** 400 « Impossible de supprimer le dernier administrateur actif » · 429 · 500.
+
+> Avant le 2026-10-11, cette route répondait toujours 500 (modèles et colonnes inexistants dans `rgpd.service.js`).
 
 ---
 
@@ -465,11 +483,13 @@ La réponse contient aussi `data.pricePerKg`, ainsi que `breakdown.countryId`. E
 
 #### `GET /nanei/client/rechercher-client`
 
-Recherche d’un destinataire **ayant un compte actif**.
+Recherche d’un destinataire **inscrit et actif**, par identifiant exact.
 
-**Paramètre :** `q` (texte). Il est cherché dans `nom`, `prenom` ou `email` avec `LIKE %q%`, **sensible à la casse** (PostgreSQL). Si `q` est vide → `data: []`.
+**Paramètre :** `q` = **e-mail complet** ou **numéro de téléphone** d’au moins **7 chiffres** (avec ou sans indicatif, mêmes règles que la connexion). En dessous, aucune recherche n’est faite. Plus de recherche partielle par nom : elle permettait de parcourir l’annuaire des clients.
 
-**Réponse 200 :** `{ "data": [ { "id": "uuid", "nom": "…", "prenom": "…", "email": "…", "telephone": "…" } ] }` (20 au maximum). Les comptes `Admin` et les comptes légers `inactif` sont exclus.
+**Réponse 200 :** `{ "data": [ { "id": "uuid", "nom": "Diallo", "prenom": "Aminata", "email": "am***@gmail.com", "telephone": "+223 ** ** 12 34" } ] }` — **un seul** résultat au plus, e-mail et téléphone **masqués**. Sinon `{ "data": [] }` (aucun compte, compte admin, compte inactif ou automatique, ou soi-même).
+
+> L’envoi de colis n’utilise que `id` (`recepteurId`). Si rien n’est trouvé, le mobile propose la saisie manuelle du destinataire.
 
 ---
 
@@ -481,7 +501,7 @@ Aucune validation Joi : les contrôles viennent du service et des contraintes de
 
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
-| `recepteurId` | UUID | **oui, sauf si** `destinataireManuel` | compte existant, sinon 400 « Recepteur non trouvé » |
+| `recepteurId` | UUID | **oui, sauf si** `destinataireManuel` | compte client existant (jamais un administrateur), sinon 400 « Recepteur non trouvé » |
 | `destinataireManuel` | objet | **oui, sauf si** `recepteurId` | prioritaire sur `recepteurId` s’il est présent (voir ci-dessous) |
 | `poids` | number | **oui** | kg ; absent → 400 (message d’erreur Sequelize) |
 | `countryId` | UUID | **oui** (app ≥ 1.0.2+13) | pays de destination. Avec `shippingType`, déclenche le **calcul du prix par le back** |
@@ -601,7 +621,7 @@ Colis où l’utilisateur est l’expéditeur (respectivement le destinataire), 
 }
 ```
 
-> `statut` ∈ `en_attente` | `recupere` | `livre`. C’est la seule source de vérité : il est modifié par l’admin (`PATCH /nanei/admin/...`). Le mobile doit recharger la liste pour voir un changement (ou réagir à la notification push).
+> `statut` ∈ `en_attente` | `recupere` | `livre`. C’est la seule source de vérité : il est modifié par l’admin (`PUT /nanei/admin/changer-statut-*/:id`). Le mobile doit recharger la liste pour voir un changement (ou réagir à la notification push).
 
 **Erreurs :** 400 `{ message }` · 500 `{ message, erreur }`.
 
@@ -633,7 +653,9 @@ Utilisé après le scan du QR code de l’étiquette.
 
 #### `GET /nanei/client/mes-notifications`
 
-Notifications **reçues** (une est créée pour le destinataire à chaque nouveau colis), les 50 plus récentes.
+Notifications **reçues** (une est créée pour le destinataire à chaque nouveau colis). Avec `?page=&limit=` : paginées ; sans : les 50 plus récentes.
+
+La réponse contient toujours `non_lues` : nombre **total** de notifications non lues (toutes pages), pour le badge.
 
 > Les changements de statut faits par l’admin **ne créent pas** de ligne ici : ils passent uniquement par une notification push FCM.
 
@@ -747,6 +769,7 @@ Appelée par le navigateur après le paiement Wave ou Orange Money (pas par l’
 
 - **Wave :** le back interroge l’API Wave (`GET /checkout/sessions/:id`). Il ne passe le paiement à `paye` que si Wave confirme `checkout_status = complete`, la bonne référence (`client_reference`) **et** le bon montant en XOF. Si Wave répond `error` ou `expired`, le paiement passe à `echoue`.
 - **Orange Money :** rien n’est écrit en base ; le paiement reste `en_cours` jusqu’au **webhook signé** d’Orange Money.
+- **Webhooks (Wave / Orange Money) :** signature HMAC vérifiée sur le corps brut ; un webhook ne modifie jamais un paiement déjà `paye` ou `rembourse`, et ne valide pas un paiement dont le montant annoncé diffère du montant attendu en XOF.
 
 La page HTML affichée, et le lien profond vers lequel elle redirige, dépendent de l’état **vérifié** :
 
@@ -822,6 +845,10 @@ Les téléphones sont masqués (2 premiers et 2 derniers caractères). L’histo
 
 ## 9. Preuve de livraison
 
+| Méthode | Chemin | Accès |
+|---|---|---|
+| GET | `/nanei/colis/:colisId/preuve` | jeton (expéditeur ou destinataire du colis) |
+
 #### `GET /nanei/colis/:colisId/preuve`
 
 - **Accès :** jeton ; expéditeur **ou** destinataire du colis.
@@ -862,7 +889,7 @@ Les téléphones sont masqués (2 premiers et 2 derniers caractères). L’histo
 
 **Réponse 201 :** `{ "success": true, "message": "Avis enregistré", "avis": { id, colis_id, utilisateur_id, note, commentaire, createdAt, updatedAt } }`.
 
-**Erreurs :** 400 « colis_id et note sont obligatoires » · 400 « La note doit être entre 1 et 5 » · 404 « Colis introuvable » · 403 « Ce colis ne vous appartient pas » · 400 « Vous pouvez donner un avis uniquement après livraison » · 409 « Un avis existe déjà pour ce colis » · 500.
+**Erreurs :** 400 « colis_id et note sont obligatoires » · 400 « La note doit être un entier entre 1 et 5 » (« 4 » accepté, 4.5 ou « abc » refusés) · 404 « Colis introuvable » · 403 « Ce colis ne vous appartient pas » · 400 « Vous pouvez donner un avis uniquement après livraison » · 409 « Un avis existe déjà pour ce colis » · 500.
 
 > Un seul avis par colis, donné par l’**expéditeur**. Le mobile n’affiche le bandeau « Donnez votre avis » qu’à l’expéditeur, et seulement si `GET /avis` ne contient pas déjà ce colis. Une réponse 409 est traitée comme « déjà noté ».
 
@@ -946,6 +973,10 @@ Mêmes champs, tous facultatifs (un champ présent remplace la valeur). **Répon
 ---
 
 ## 13. Message au support
+
+| Méthode | Chemin | Accès |
+|---|---|---|
+| POST | `/nanei/messages` | **public** (visiteur ou client) |
 
 #### `POST /nanei/messages`
 
@@ -1079,6 +1110,53 @@ Mêmes champs, tous facultatifs (un champ présent remplace la valeur). **Répon
 | # | Gravité | Constat |
 |---|---|---|
 | 27 | Moyenne | `GET /client/rechercher-client` expose l’e-mail et le téléphone de tout compte actif à n’importe quel utilisateur connecté. |
+
+### C.4 bis Correctifs du 2026-10-11 issus de la vérification de l’admin
+
+| # | Statut | Problème | Correctif |
+|---|---|---|---|
+| 28 | ✅ DONE | `DELETE /nanei/account` répondait toujours 500. | Réécrite en anonymisation (voir §2). |
+| 29 | ✅ DONE | Un client désactivé par un admin pouvait être repris par une nouvelle inscription avec son e-mail ou son téléphone (le compte était réactivé avec le nouveau mot de passe). | Seuls les comptes destinataires automatiques (`utilisateur.compte_auto`) sont revendiqués à l’inscription. |
+| 30 | ✅ DONE | Changement et réinitialisation du mot de passe : les autres sessions restaient valides (point 22 de C.3). | Sessions révoquées ; `change-password` renvoie de nouveaux jetons, enregistrés par le mobile. `/auth/refresh` refuse un compte désactivé. |
+| 31 | ✅ DONE | `/auth/refresh` partageait la limite de 5 / 15 min avec la connexion (point 24 de C.3). | Compteurs séparés : connexion 5, renouvellement 30, mots de passe 5 (par 15 min et par IP). |
+
+### C.4 ter Correctifs du 2026-10-12
+
+| # | Statut | Problème | Correctif |
+|---|---|---|---|
+| 32 | ✅ DONE | `rechercher-client` exposait e-mail et téléphone de tout compte actif (point 27 de C.4). | Identifiant exact, un résultat, données masquées (voir §4). |
+| 33 | ✅ DONE | Inscription sans `adresse` → 500 (point 21 de C.3). | Adresse vide par défaut. |
+| 34 | ✅ DONE (à confirmer avec un vrai webhook) | Signature des webhooks sur un corps reconstruit (point 25 de C.3). | Corps brut ; format Wave `t=…,v1=…`. |
+| 35 | ✅ DONE | « Compte inactif » révélait l’existence d’un compte. | Mot de passe vérifié d’abord. |
+| 36 | ✅ DONE | Aucune liste paginée. | Pagination facultative (§0) ; boutons Précédent / Suivant dans l’app. |
+| 37 | ✅ DONE | Erreurs 500 avec détail technique. | Filtre global des réponses d’erreur. |
+| 38 | ✅ DONE | Type des photos (profil, réclamation) contrôlé sur la déclaration seulement. | Contenu vérifié (PNG, JPEG, WEBP, PDF). |
+
+### C.4 quater Pagination dans l’application (2026-10-12)
+
+Paramètres et champs ajoutés aux listes du client (toujours facultatifs, voir « Pagination des listes », §0) :
+
+| Route | Clé | Filtre | Champs ajoutés à la réponse |
+|---|---|---|---|
+| `GET /client/colis-envoyes`, `GET /client/colis-recus` | `data` | `statut` (`en_attente`, `recupere`, `livre` ; autre → 400), appliqué avant la pagination | `par_statut: { en_attente, recupere, livre, total }` (toutes pages, sans filtre) |
+| `GET /paiements` | `data` | `statut` (`en_attente`, `en_cours`, `paye`, `echoue`, `rembourse` ; autre → 400) | `par_statut: { en_attente, en_cours, paye, echoue, rembourse, total }` |
+| `GET /client/mes-notifications` | `data` | — | `non_lues` (total des non lues) |
+| `GET /reclamations`, `GET /avis`, `GET /contacts` | `reclamations`, `avis`, `contacts` | `GET /contacts` : `q` | — |
+
+Écrans paginés (20 par page, barre « Précédent » / « Suivant » / « Page X sur Y » en fin de liste, `lib/core/widgets/barre_pagination.dart`, `lib/core/utils/pagination.dart`) : Mes colis (Reçus, Envoyés), Suivi (Tous, Envoyés, Reçus), Notifications, Mes paiements, Mes réclamations, Mes contacts, Mes avis. Les filtres par statut passent au serveur, les compteurs viennent de `par_statut`, le badge des notifications de `non_lues`.
+
+Laissés sans pagination, volontairement : sélecteur de pays, `GET /avis` dans le détail d’un colis (savoir s’il est déjà noté), liste des colis du formulaire de réclamation (sélecteur).
+
+### C.4 quinquies Correctifs issus des suites de tests (2026-10-12)
+
+| # | Statut | Problème | Correctif |
+|---|---|---|---|
+| 39 | ✅ DONE | `GET /paiements` renvoyait au client `webhookPayload` (charge brute de l’opérateur) et transformait un `montantPaye` absent en `0`. | `webhookPayload` retiré ; `null` conservé. |
+| 40 | ✅ DONE | `PUT /account/modifier-profil` lisait un champ `carte_identite_national_num` inexistant (ni colonne ni schéma). | Retiré du contrôleur. |
+| 41 | ✅ DONE | Contacts : champ `pays` à l’écriture, `pays_id` à la lecture. | `pays_id` accepté à l’écriture (`pays` toujours toléré). |
+| 42 | ✅ DONE | Recherche de destinataire : seuil de 5 caractères pour un numéro, alors que la connexion en exige 7 chiffres. | 7 chiffres minimum pour un numéro. |
+
+Suites de tests (2026-10-12) : back **678 tests** (Jest + Supertest, `src/__tests__/`, exécutés par le CI avant tout déploiement), admin **166 tests** (Vitest), mobile **272 tests** (`flutter test`, exécutés par le CI avant toute publication).
 
 ### C.5 Déploiement
 

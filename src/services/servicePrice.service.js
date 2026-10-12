@@ -1,6 +1,7 @@
 const ServicePrice = require('../models/servicePrice.model');
 const Country = require('../models/country.model');
 const logger = require('../config/logger');
+const { erreurNombres } = require('../utils/validationNombres');
 
 class ServicePriceService {
   static async getServicePrices(filters = {}) {
@@ -90,6 +91,9 @@ class ServicePriceService {
         };
       }
 
+      const erreur = erreurNombres([['Prix', price]]);
+      if (erreur) return { success: false, message: erreur };
+
       const country = await Country.findByPk(countryId);
       if (!country) {
         return {
@@ -173,6 +177,9 @@ class ServicePriceService {
           message: 'Type de service invalide',
         };
       }
+
+      const erreur = erreurNombres([['Prix', price]]);
+      if (erreur) return { success: false, message: erreur };
 
       await servicePrice.update({
         serviceType: serviceType || servicePrice.serviceType,

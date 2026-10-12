@@ -1,7 +1,8 @@
 const { Colis, Utilisateur, Notifications, ContactFavori } = require('../../models');
+const { paginer, lirePagination, metaPagination } = require('../../utils/pagination');
 const Paiement = require('../../models/paiement.model');
 const sequelize = require('../../config/db');
-const { Op } = require('sequelize');
+const { Op, fn, col } = require('sequelize');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { bcryptConfig } = require('../../config/security');
@@ -9,6 +10,43 @@ const logger = require('../../config/logger');
 const { sendSMS } = require('../twilio.service');
 const PricingCalculatorService = require('../pricingCalculator.service');
 const { normaliserTypeTransport } = require('../../utils/typeTransport');
+
+/** « aminata.diallo@gmail.com » → « am***@gmail.com » */
+function masquerEmail(email) {
+  const [local, domaine] = String(email || '').split('@');
+  if (!domaine) return '';
+  return `${local.slice(0, 2)}***@${domaine}`;
+}
+
+/** « +22376001234 » → « +223 ** ** 12 34 » (indicatif et 4 derniers chiffres) */
+function masquerTelephone(tel) {
+  const t = String(tel || '').replace(/\s/g, '');
+  if (t.length < 6) return '';
+  const fin = t.slice(-4);
+  const indicatif = t.startsWith('+') ? t.slice(0, 4) : '';
+  return `${indicatif} ** ** ${fin.slice(0, 2)} ${fin.slice(2)}`.trim();
+}
+
+const STATUTS_COLIS = ['en_attente', 'recupere', 'livre'];
+
+/** Filtre facultatif ?statut= des listes de colis du client (appliqué AVANT la pagination). */
+function filtreStatutColis(statut) {
+  if (statut === undefined || statut === '' || statut === 'tous') return { where: {} };
+  if (!STATUTS_COLIS.includes(statut)) return { erreur: `Statut invalide (${STATUTS_COLIS.join(', ')})` };
+  return { where: { statut } };
+}
+
+/** Nombre de colis par statut, sur TOUTES les pages (compteurs des écrans mobiles). */
+async function compterColisParStatut(where) {
+  const lignes = await Colis.findAll({ where, attributes: ['statut', [fn('COUNT', col('id')), 'nombre']], group: ['statut'], raw: true });
+  const resultat = { en_attente: 0, recupere: 0, livre: 0, total: 0 };
+  for (const l of lignes) {
+    const n = Number(l.nombre) || 0;
+    resultat[l.statut] = n;
+    resultat.total += n;
+  }
+  return resultat;
+}
 
 class EnvoieColisService {
 
@@ -64,6 +102,7 @@ class EnvoieColisService {
       telephone,
       role: 'Particulier',
       statut: 'inactif',
+      compteAuto: true, // revendiquable à l'inscription (voir auth.service)
     }, { transaction });
 
     return recepteur;
@@ -190,7 +229,9 @@ class EnvoieColisService {
         recepteur = await this.resoudreOuCreerRecepteur({ destinataireManuel, transaction });
       } else {
         recepteur = await Utilisateur.findByPk(recepteurId, { transaction });
-        if (!recepteur) {
+        // Un compte administrateur n'est jamais destinataire (même règle que
+        // la saisie manuelle et la recherche de client).
+        if (!recepteur || recepteur.role === 'Admin') {
           throw new Error('Recepteur non trouvé');
         }
       }
@@ -309,7 +350,7 @@ class EnvoieColisService {
           recepteur = await this.resoudreOuCreerRecepteur({ destinataireManuel, transaction });
         } else {
           recepteur = await Utilisateur.findByPk(recepteurId, { transaction });
-          if (!recepteur) {
+          if (!recepteur || recepteur.role === 'Admin') {
             throw new Error('Récepteur non trouvé pour un des colis du lot');
           }
         }
@@ -380,54 +421,66 @@ class EnvoieColisService {
   }
 
   // 🔹 Rechercher un client par nom, prénom ou email
-  static async rechercherClient(searchTerm) {
+  // 🔹 Recherche d'un destinataire inscrit, par e-mail OU téléphone EXACT.
+  //
+  // Avant : recherche partielle sur nom / prénom / e-mail (« a » renvoyait 20
+  // comptes avec leur e-mail et leur téléphone complets) — n'importe quel
+  // client connecté pouvait parcourir l'annuaire. Maintenant :
+  //  - il faut connaître l'e-mail complet ou le numéro (mêmes règles que la
+  //    connexion : avec ou sans indicatif) ;
+  //  - au plus UN compte est renvoyé, client actif seulement ;
+  //  - e-mail et téléphone sont MASQUÉS (affichage de confirmation) ; l'envoi
+  //    n'utilise que l'`id`.
+  static async rechercherClient(searchTerm, demandeurId) {
     try {
-      // Si la recherche est vide, on peut retourner une liste vide
-      if (!searchTerm || searchTerm.trim() === '') {
-        return {
-          success: true,
-          data: []
-        };
+      const saisie = String(searchTerm || '').trim();
+      if (saisie.length < 5) {
+        return { success: true, data: [] };
       }
 
-      const clients = await Utilisateur.findAll({
-        where: {
-          // Whitelist explicite : seuls les comptes Particulier sont
-          // sélectionnables comme destinataire. Ne jamais exposer les
-          // comptes Admin (email/identité) à la recherche client.
-          role: 'Particulier',
-          // Exclure les comptes "légers" créés automatiquement pour un
-          // destinataire sans compte : ils ne sont pas censés être
-          // découvrables par d'autres expéditeurs.
-          statut: 'actif',
-          [Op.or]: [
-            { nom: { [Op.like]: `%${searchTerm}%` } },
-            { prenom: { [Op.like]: `%${searchTerm}%` } },
-            { email: { [Op.like]: `%${searchTerm}%` } }
-          ]
-        },
-        attributes: ['id', 'nom', 'prenom', 'email', 'telephone'], // on limite aux champs utiles
-        limit: 20 // limite raisonnable
-      });
+      const AuthService = require('../auth.service');
+      const estEmail = /^\S+@\S+\.\S+$/.test(saisie);
+      // Un numéro doit compter au moins 7 chiffres (même règle que la
+      // connexion par téléphone) : en dessous, aucune recherche.
+      if (!estEmail && saisie.replace(/\D/g, '').length < 7) {
+        return { success: true, data: [] };
+      }
+      const trouve = estEmail
+        ? await Utilisateur.findOne({ where: { email: saisie.toLowerCase() } })
+        : await AuthService.trouverParTelephone(saisie);
+
+      if (!trouve || trouve.role !== 'Particulier' || trouve.statut !== 'actif' || trouve.compteAuto
+          || String(trouve.id) === String(demandeurId)) {
+        return { success: true, data: [] };
+      }
 
       return {
         success: true,
-        data: clients
+        data: [{
+          id: trouve.id,
+          nom: trouve.nom,
+          prenom: trouve.prenom,
+          email: masquerEmail(trouve.email),
+          telephone: masquerTelephone(trouve.telephone),
+        }],
       };
     } catch (error) {
       logger.error('Erreur rechercherClient', { error: error.message, stack: error.stack });
       return {
         success: false,
-        message: error.message
+        message: 'Recherche impossible pour le moment'
       };
     }
   }
 
   // 🔹 Récupérer les colis envoyés par un utilisateur
-  static async getColisEnvoyes(utilisateurId) {
+  // Pagination facultative (?page=&limit=) : sans paramètre, liste complète.
+  static async getColisEnvoyes(utilisateurId, query = {}) {
     try {
-      const colisEnvoyes = await Colis.findAll({
-        where: { expediteurId: utilisateurId },
+      const filtre = filtreStatutColis(query.statut);
+      if (filtre.erreur) return { success: false, message: filtre.erreur };
+      const { lignes: colisEnvoyes, pagination } = await paginer(Colis, {
+        where: { expediteurId: utilisateurId, ...filtre.where },
         include: [
           {
             model: Utilisateur,
@@ -441,11 +494,13 @@ class EnvoieColisService {
           },
         ],
         order: [['created_at', 'DESC']]
-      });
+      }, query);
 
       return {
         success: true,
-        data: colisEnvoyes
+        data: colisEnvoyes,
+        pagination,
+        par_statut: await compterColisParStatut({ expediteurId: utilisateurId })
       };
     } catch (error) {
       logger.error('Erreur getColisEnvoyes', { error: error.message, stack: error.stack });
@@ -457,10 +512,13 @@ class EnvoieColisService {
   }
 
   // 🔹 Récupérer les colis reçus par un utilisateur
-  static async getColisRecus(utilisateurId) {
+  // Pagination facultative (?page=&limit=) : sans paramètre, liste complète.
+  static async getColisRecus(utilisateurId, query = {}) {
     try {
-      const colisRecus = await Colis.findAll({
-        where: { recepteurId: utilisateurId },
+      const filtre = filtreStatutColis(query.statut);
+      if (filtre.erreur) return { success: false, message: filtre.erreur };
+      const { lignes: colisRecus, pagination } = await paginer(Colis, {
+        where: { recepteurId: utilisateurId, ...filtre.where },
         include: [
           {
             model: Utilisateur,
@@ -474,11 +532,13 @@ class EnvoieColisService {
           },
         ],
         order: [['created_at', 'DESC']]
-      });
+      }, query);
 
       return {
         success: true,
-        data: colisRecus
+        data: colisRecus,
+        pagination,
+        par_statut: await compterColisParStatut({ recepteurId: utilisateurId })
       };
     } catch (error) {
       logger.error('Erreur getColisRecus', { error: error.message, stack: error.stack });
@@ -549,9 +609,12 @@ class EnvoieColisService {
   }
 
   // 🔹 Récupérer les notifications reçues par un utilisateur
-  static async getNotifications(utilisateurId) {
+  // Pagination facultative (?page=&limit=). Sans paramètre : les 50 plus
+  // récentes, comme avant. `non_lues` = total des non lues (toutes pages),
+  // pour le badge.
+  static async getNotifications(utilisateurId, query = {}) {
     try {
-      const notificationsRecus = await Notifications.findAll({
+      const options = {
         where: { recepteurId: utilisateurId },
         include: [
           {
@@ -566,12 +629,24 @@ class EnvoieColisService {
           }
         ],
         order: [['created_at', 'DESC']],
-        limit: 50
-      });
+      };
+      const p = lirePagination(query);
+      let notificationsRecus;
+      let pagination = null;
+      if (p) {
+        const { count, rows } = await Notifications.findAndCountAll({ ...options, limit: p.limit, offset: p.offset, distinct: true });
+        notificationsRecus = rows;
+        pagination = metaPagination(p, count);
+      } else {
+        notificationsRecus = await Notifications.findAll({ ...options, limit: 50 });
+      }
+      const non_lues = await Notifications.count({ where: { recepteurId: utilisateurId, statut: 'non_lu' } });
 
       return {
         success: true,
-        data: notificationsRecus
+        data: notificationsRecus,
+        pagination,
+        non_lues
       };
     } catch (error) {
       logger.error('Erreur getNotifications', { error: error.message, stack: error.stack });

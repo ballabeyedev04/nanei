@@ -101,29 +101,26 @@ exports.refresh = async (req, res) => {
       return res.status(401).json({ message: 'Refresh token invalide' });
     }
 
-    const newToken = jwt.sign(
-      { id: payload.id, role: payload.role },
-      jwtConfig.secret,
-      { expiresIn: jwtConfig.expiresIn }
-    );
+    // Le compte doit toujours exister et être actif (avant : un compte
+    // désactivé ou supprimé gardait sa session tant que le refresh token
+    // était valide), et le refresh token doit être postérieur au dernier
+    // changement de mot de passe.
+    const Utilisateur = require('../models/utilisateur.model');
+    const utilisateur = await Utilisateur.findByPk(payload.id);
+    if (!utilisateur || utilisateur.statut !== 'actif' ||
+        (utilisateur.passwordChangedAt && payload.iat * 1000 < utilisateur.passwordChangedAt.getTime())) {
+      await stored.update({ revoked: true });
+      return res.status(401).json({ message: 'Session expirée, veuillez vous reconnecter' });
+    }
+
+    // Même jeton d'accès qu'à la connexion (avant : { id, role } seulement).
+    const newToken = AuthService.genererJetonAcces(utilisateur);
 
     // Rotation : l'ancien refresh token est révoqué et remplacé par un
-    // nouveau. Un rejeu de l'ancien (fuite) échouera désormais.
-    const newRefreshToken = jwt.sign(
-      { id: payload.id, role: payload.role },
-      jwtConfig.refreshSecret,
-      { expiresIn: jwtConfig.refreshExpiresIn }
-    );
-    const newHash = crypto.createHash('sha256').update(newRefreshToken).digest('hex');
-    const { exp } = jwt.decode(newRefreshToken);
-
+    // nouveau (jti aléatoire, voir AuthService.genererRefreshToken). Un rejeu
+    // de l'ancien (fuite) échouera désormais.
     await stored.update({ revoked: true });
-    await RefreshToken.create({
-      tokenHash: newHash,
-      utilisateurId: payload.id,
-      expiresAt: new Date(exp * 1000),
-      revoked: false,
-    });
+    const newRefreshToken = await AuthService.genererRefreshToken(utilisateur);
 
     return res.status(200).json({ token: newToken, refreshToken: newRefreshToken });
   } catch (err) {

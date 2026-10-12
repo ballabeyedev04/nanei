@@ -6,8 +6,33 @@ on:
       - main
 
 jobs:
+  # Aucun déploiement ne part si un test échoue : `deploy` dépend de `test`.
+  # Les tests d'intégration (src/__tests__/integration) sont sautés ici, faute
+  # de NANEI_TEST_DB_NAME ; les tests de parité mobile / admin aussi (dépôts
+  # voisins absents). Voir src/__tests__/README.md.
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Tests
+        run: npm test
+
   deploy:
     name: Deploy
+    needs: test
     runs-on: ubuntu-latest
 
     steps:

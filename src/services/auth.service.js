@@ -9,14 +9,22 @@ const crypto = require("crypto");
 const logger = require('../config/logger');
 const { sendOtpEmail } = require('./resend.service');
 
+// Hash bcrypt d'une valeur aléatoire : sert à comparer un mot de passe quand
+// l'identifiant est inconnu, pour que la réponse prenne le même temps.
+const HASH_FICTIF = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 10);
+
 class AuthService {
 
   // 🔹 Génère un refresh token (JWT longue durée) et enregistre son hash
   // SHA-256 en base (table refresh_tokens). Le token brut n'est jamais
   // stocké — une fuite DB ne compromet donc pas les sessions actives.
   static async genererRefreshToken(utilisateur) {
+    // `jti` aléatoire : deux refresh tokens émis dans la MÊME seconde pour le
+    // même compte (connexion puis rotation immédiate, deux appareils) étaient
+    // identiques octet pour octet → même empreinte → violation de la
+    // contrainte d'unicité de token_hash et 500 au renouvellement.
     const refreshToken = jwt.sign(
-      { id: utilisateur.id, role: utilisateur.role },
+      { id: utilisateur.id, role: utilisateur.role, jti: crypto.randomUUID() },
       jwtConfig.refreshSecret,
       { expiresIn: jwtConfig.refreshExpiresIn }
     );
@@ -32,6 +40,33 @@ class AuthService {
     });
 
     return refreshToken;
+  }
+
+  // 🔹 Jeton d'accès (1 h) — même contenu qu'à la connexion.
+  static genererJetonAcces(utilisateur) {
+    return jwt.sign({
+      id: utilisateur.id,
+      nom: utilisateur.nom,
+      prenom: utilisateur.prenom,
+      email: utilisateur.email,
+      adresse: utilisateur.adresse,
+      telephone: utilisateur.telephone,
+      photoProfil: utilisateur.photoProfil,
+      role: utilisateur.role
+    }, jwtConfig.secret, { expiresIn: jwtConfig.expiresIn });
+  }
+
+  // 🔹 Coupe TOUTES les sessions d'un utilisateur après un changement de mot
+  // de passe : refresh tokens révoqués, et passwordChangedAt mis à jour (le
+  // middleware d'auth refuse tout jeton d'accès émis avant cette date).
+  // passwordChangedAt est reculé d'1 s : un jeton émis juste après (même
+  // seconde, `iat` arrondi à la seconde) reste valable.
+  static async revoquerSessions(utilisateur, { transaction } = {}) {
+    utilisateur.passwordChangedAt = new Date(Date.now() - 1000);
+    await RefreshToken.update(
+      { revoked: true },
+      { where: { utilisateurId: utilisateur.id, revoked: false }, transaction }
+    );
   }
 
   // -------------------- INSCRIPTION --------------------
@@ -77,6 +112,9 @@ class AuthService {
       }
 
       const emailClean = email.trim().toLowerCase();
+      // Adresse facultative pour l'inscription, mais la colonne est NOT NULL :
+      // absente, elle provoquait une erreur 500. Vide par défaut.
+      adresse = typeof adresse === 'string' ? adresse.trim() : '';
       // Normaliser le téléphone : si falsy, le passer comme null pour éviter les valeurs undefined
       const tel = telephone || null;
 
@@ -94,6 +132,9 @@ class AuthService {
         where: {
           statut: 'inactif',
           role: 'Particulier',
+          // Uniquement un compte créé automatiquement (jamais un client
+          // désactivé par un admin, qui ne doit pas pouvoir être repris).
+          compteAuto: true,
           [Op.or]: [
             { email: emailClean },
             ...(tel ? [{ telephone: tel }] : []),
@@ -133,6 +174,7 @@ class AuthService {
         compteFantome.telephone = tel;
         compteFantome.role = role;
         compteFantome.statut = 'actif';
+        compteFantome.compteAuto = false;
         compteFantome.passwordChangedAt = new Date();
         await compteFantome.save({ transaction: t });
 
@@ -246,37 +288,29 @@ class AuthService {
       ? await Utilisateur.findOne({ where: { email: identifiant.trim().toLowerCase() } })
       : await this.trouverParTelephone(identifiant);
 
-    if (!utilisateur)
-      return {
-        success: false,
-        error: 'Identifiant ou mot de passe incorrect'
-      };
-    if (utilisateur.statut !== 'actif') {
-      return {
-        success: false,
-        message: `Compte ${utilisateur.statut}`
-      };
-    }
-
-    const valid = await bcrypt.compare(mot_de_passe, utilisateur.mot_de_passe);
-    if (!valid) {
+    // Le mot de passe est vérifié AVANT l'état du compte, et un compte
+    // inconnu passe aussi par une comparaison bcrypt (même durée de réponse).
+    // Avant, « Compte inactif » était renvoyé sans mot de passe valide : on
+    // pouvait savoir si un e-mail ou un numéro avait un compte, et lequel
+    // était désactivé.
+    const valid = await bcrypt.compare(
+      String(mot_de_passe ?? ''),
+      utilisateur ? utilisateur.mot_de_passe : HASH_FICTIF
+    );
+    if (!utilisateur || !valid) {
       return {
         success: false,
         message: 'Identifiant ou mot de passe incorrect'
       };
     }
+    if (utilisateur.statut !== 'actif') {
+      return {
+        success: false,
+        message: 'Compte désactivé. Contactez le support.'
+      };
+    }
 
-    const token = jwt.sign({
-      id: utilisateur.id,
-      nom: utilisateur.nom,
-      prenom: utilisateur.prenom,
-      email: utilisateur.email,
-      adresse: utilisateur.adresse,
-      telephone: utilisateur.telephone,
-      photoProfil: utilisateur.photoProfil,
-      role: utilisateur.role
-    }, jwtConfig.secret, { expiresIn: jwtConfig.expiresIn });
-
+    const token = this.genererJetonAcces(utilisateur);
     const refreshToken = await this.genererRefreshToken(utilisateur);
 
     return { success: true, token, refreshToken, utilisateur };
@@ -288,14 +322,13 @@ class AuthService {
       const UserOtp = require('../models/userOtp.model');
       const utilisateur = await Utilisateur.findOne({ where: { email: email.trim().toLowerCase() } });
 
-      // Email inexistant → réponse générique (sécurité)
-      if (!utilisateur) {
+      // Email inexistant, compte administrateur (parcours dédié :
+      // POST /admin/forgot-password) ou compte désactivé → MÊME réponse
+      // générique, sans envoi. Avant, un admin recevait 400 « Action non
+      // autorisée » : la route révélait quelles adresses étaient celles des
+      // administrateurs.
+      if (!utilisateur || utilisateur.role === 'Admin' || utilisateur.statut !== 'actif') {
         return { success: true, message: 'Si un compte existe avec cet email, un code de réinitialisation a été envoyé.' };
-      }
-
-      // Bloquer les admins
-      if (utilisateur.role === 'Admin') {
-        return { success: false, message: 'Action non autorisée' };
       }
 
       // Générer OTP 6 chiffres
@@ -351,13 +384,16 @@ class AuthService {
         where: { email: email.trim().toLowerCase() }
       });
 
+      // Compte inconnu : même réponse qu'un compte sans code en cours (avant,
+      // « Compte introuvable » permettait de tester l'existence d'un e-mail).
+      const AUCUN_CODE = 'Aucun code de réinitialisation trouvé. Veuillez refaire la demande.';
       if (!utilisateur) {
-        return { success: false, message: 'Compte introuvable' };
+        return { success: false, message: AUCUN_CODE };
       }
 
       const otpRecord = await UserOtp.findOne({ where: { utilisateurId: utilisateur.id } });
       if (!otpRecord) {
-        return { success: false, message: 'Aucun code de réinitialisation trouvé. Veuillez refaire la demande.' };
+        return { success: false, message: AUCUN_CODE };
       }
 
       // SÉCURITÉ: Vérifier le blocage (brute-force protection)
@@ -392,6 +428,8 @@ class AuthService {
       utilisateur.mot_de_passe = await bcrypt.hash(motDePasse, bcryptConfig.saltRounds);
       utilisateur.otpCode = null; // Nettoyer les anciens champs s'ils existent
       utilisateur.otpExpires = null;
+      // Mot de passe réinitialisé : toutes les sessions existantes sont coupées.
+      await AuthService.revoquerSessions(utilisateur);
       await utilisateur.save();
       await otpRecord.destroy();
 

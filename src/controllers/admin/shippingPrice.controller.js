@@ -1,5 +1,6 @@
 const ShippingPriceService = require('../../services/shippingPrice.service');
 const logger = require('../../config/logger');
+const { statutEchec } = require('../../utils/statutHttp');
 
 exports.getShippingPrices = async (req, res) => {
   try {
@@ -12,7 +13,7 @@ exports.getShippingPrices = async (req, res) => {
     const result = await ShippingPriceService.getShippingPrices(filters);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(200).json({
@@ -35,7 +36,7 @@ exports.getShippingPriceById = async (req, res) => {
     const result = await ShippingPriceService.getShippingPriceById(id);
 
     if (!result.success) {
-      return res.status(404).json(result);
+      return res.status(statutEchec(result, 404)).json(result);
     }
 
     return res.status(200).json({
@@ -56,7 +57,7 @@ exports.createShippingPrice = async (req, res) => {
     const result = await ShippingPriceService.createShippingPrice(req.body);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(201).json(result);
@@ -76,7 +77,7 @@ exports.updateShippingPrice = async (req, res) => {
     const result = await ShippingPriceService.updateShippingPrice(id, req.body);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(200).json(result);
@@ -92,7 +93,7 @@ exports.updateShippingPrice = async (req, res) => {
 exports.createOrUpdateBulk = async (req, res) => {
   try {
     const result = await ShippingPriceService.createOrUpdateBulk(req.body);
-    if (!result.success) return res.status(400).json(result);
+    if (!result.success) return res.status(statutEchec(result, 400)).json(result);
     return res.status(200).json(result);
   } catch (error) {
     logger.error('Erreur createOrUpdateBulk shippingPrice', { error: error.message, user_id: req.user?.id });
@@ -107,7 +108,7 @@ exports.deleteShippingPrice = async (req, res) => {
     const result = await ShippingPriceService.deleteShippingPrice(id);
 
     if (!result.success) {
-      return res.status(404).json(result);
+      return res.status(statutEchec(result, 404)).json(result);
     }
 
     return res.status(200).json(result);

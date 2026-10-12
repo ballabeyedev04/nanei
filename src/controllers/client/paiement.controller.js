@@ -3,7 +3,8 @@ const logger = require('../../config/logger');
 
 exports.mesPaiements = async (req, res) => {
   try {
-    const result = await ClientPaiementService.mesPaiements(req.user.id);
+    const result = await ClientPaiementService.mesPaiements(req.user.id, req.query);
+    if (result.success === false) { const { status = 400, ...corps } = result; return res.status(status).json(corps); }
     return res.status(200).json(result);
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Erreur serveur', error: err.message });

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const QRCode = require('qrcode');
 const htmlToPdf = require('../utils/htmlToPdf');
+const { echapperHtml } = require('../utils/echapperHtml');
 
 const BASE_URL = process.env.BACKEND_URL || 'http://localhost:3000';
 
@@ -38,7 +39,13 @@ async function qrCodeDataUri(reference) {
   });
 }
 
-async function etiquetteHtml(data) {
+async function etiquetteHtml(donnees) {
+  // Textes saisis par les clients (noms, e-mails, destination) échappés : le
+  // HTML est rendu par Chromium côté serveur, une balise injectée
+  // (`<img src="http://…">`, `<iframe>`) y serait chargée par le serveur.
+  const data = Object.fromEntries(Object.entries(donnees).map(([k, v]) => [
+    k, typeof v === 'string' && k !== 'typeTransport' ? echapperHtml(v) : v,
+  ]));
   const {
     reference,
     expediteurNom,
@@ -70,7 +77,8 @@ async function etiquetteHtml(data) {
     return c.slice(0, 2) + '****' + c.slice(-2);
   };
 
-  const qrSrc = await qrCodeDataUri(reference);
+  // QR code : la référence BRUTE (elle est encodée dans l'image, pas dans le HTML).
+  const qrSrc = await qrCodeDataUri(donnees.reference);
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -302,4 +310,4 @@ async function genererEtiquette(colisData) {
   });
 }
 
-module.exports = { genererEtiquette };
+module.exports = { genererEtiquette, etiquetteHtml };

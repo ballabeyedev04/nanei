@@ -1,4 +1,7 @@
+const { Op, fn, col } = require('sequelize');
 const { Colis, Utilisateur, ColisHistorique } = require('../../models');
+const { paginer, motifRecherche, avecPagination } = require('../../utils/pagination');
+const { echapperHtml } = require('../../utils/echapperHtml');
 const { envoyerPushNotification } = require('../notification.service');
 const { sendSMS } = require('../sms.service');
 const { sendEmail } = require('../resend.service');
@@ -10,7 +13,28 @@ const STATUT_LABELS = {
   livre: 'Livré',
 };
 
+/**
+ * Après un changement de statut : ligne d'historique (attendue, fait partie
+ * de l'opération) puis notifications push / SMS / e-mail en ARRIÈRE-PLAN.
+ * Avant, la réponse attendait tous les envois : un fournisseur lent faisait
+ * dépasser le délai de l'admin (15 s), qui affichait « Erreur » alors que le
+ * statut avait bien changé.
+ */
 async function _notifierChangementStatut(colis, nouveauStatut, adminId) {
+  if (colis.statut === nouveauStatut) return; // rien n'a changé : pas de doublon
+
+  await ColisHistorique.create({
+    colis_id: colis.id,
+    ancien_statut: colis.statut,
+    nouveau_statut: nouveauStatut,
+    admin_id: adminId || null,
+  });
+
+  _envoyerNotifications(colis, nouveauStatut).catch((e) =>
+    logger.warn('Erreur notification changement statut', { colis_id: colis.id, error: e.message }));
+}
+
+async function _envoyerNotifications(colis, nouveauStatut) {
   const label = STATUT_LABELS[nouveauStatut] || nouveauStatut;
 
   // Charger expéditeur et récepteur
@@ -23,10 +47,10 @@ async function _notifierChangementStatut(colis, nouveauStatut, adminId) {
 
   // Push notifications
   if (expediteur && expediteur.fcm_token) {
-    await envoyerPushNotification(expediteur.fcm_token, 'Mise à jour colis', message, { colisId: colis.id, statut: nouveauStatut });
+    await envoyerPushNotification(expediteur.fcm_token, 'Mise à jour colis', message, { colisId: colis.id, statut: nouveauStatut }).catch((e) => logger.warn('Push erreur expéditeur', { error: e.message }));
   }
   if (recepteur && recepteur.fcm_token) {
-    await envoyerPushNotification(recepteur.fcm_token, 'Mise à jour colis', message, { colisId: colis.id, statut: nouveauStatut });
+    await envoyerPushNotification(recepteur.fcm_token, 'Mise à jour colis', message, { colisId: colis.id, statut: nouveauStatut }).catch((e) => logger.warn('Push erreur récepteur', { error: e.message }));
   }
 
   // SMS
@@ -37,54 +61,109 @@ async function _notifierChangementStatut(colis, nouveauStatut, adminId) {
     await sendSMS(recepteur.telephone, message).catch((e) => logger.warn('SMS erreur récepteur', { error: e.message }));
   }
 
-  // Emails
-  const emailHtml = `<p>${message}</p><p>Connectez-vous sur <strong>nanei.app</strong> pour plus de détails.</p>`;
-  if (expediteur && expediteur.email) {
+  // Emails (jamais vers les adresses techniques des comptes destinataires
+  // sans e-mail ni vers un compte supprimé)
+  const emailReel = (u) => u && u.email && !/@(nanei\.local|compte-supprime\.invalid)$/i.test(u.email);
+  const emailHtml = `<p>${echapperHtml(message)}</p><p>Connectez-vous sur <strong>nanei.app</strong> pour plus de détails.</p>`;
+  if (emailReel(expediteur)) {
     await sendEmail({ to: expediteur.email, subject: `Colis ${colis.reference} — ${label}`, html: emailHtml }).catch((e) => logger.warn('Email erreur expéditeur', { error: e.message }));
   }
-  if (recepteur && recepteur.email && recepteur.email !== expediteur?.email) {
+  if (emailReel(recepteur) && recepteur.email !== expediteur?.email) {
     await sendEmail({ to: recepteur.email, subject: `Colis ${colis.reference} — ${label}`, html: emailHtml }).catch((e) => logger.warn('Email erreur récepteur', { error: e.message }));
   }
+}
 
-  // Historique
-  await ColisHistorique.create({
-    colis_id: colis.id,
-    ancien_statut: colis.statut,
-    nouveau_statut: nouveauStatut,
-    admin_id: adminId || null,
+/**
+ * Liste des colis (admin), facultativement filtrée par statut.
+ * Query : `page`, `limit` (pagination facultative, voir utils/pagination.js)
+ * et `q` (recherche sur la référence et la destination).
+ */
+async function listerColis(statut, query = {}, message) {
+  const where = {};
+  if (statut) where.statut = statut;
+  const motif = motifRecherche(query.q);
+  if (motif) {
+    where[Op.or] = [
+      { reference: { [Op.iLike]: motif } },
+      { destination: { [Op.iLike]: motif } },
+    ];
+  }
+  const { lignes, pagination } = await paginer(Colis, {
+    where,
+    include: [
+      { model: Utilisateur, as: 'expediteur', attributes: ['nom', 'prenom', 'email', 'telephone'] },
+      { model: Utilisateur, as: 'recepteur', attributes: ['nom', 'prenom', 'email', 'telephone'] },
+    ],
+    order: [['created_at', 'DESC']],
+  }, query);
+
+  // Taille réelle de chaque lot (toutes pages) : avec la pagination, l'admin
+  // ne peut plus la compter sur la liste affichée.
+  const lots = [...new Set(lignes.map((c) => c.lot_id).filter(Boolean))];
+  const tailles = {};
+  if (lots.length) {
+    const comptes = await Colis.findAll({
+      where: { lot_id: { [Op.in]: lots } },
+      attributes: ['lot_id', [fn('COUNT', col('id')), 'nombre']],
+      group: ['lot_id'],
+      raw: true,
+    });
+    for (const l of comptes) tailles[l.lot_id] = Number(l.nombre) || 0;
+  }
+  const colis = lignes.map((c) => {
+    const json = c.toJSON();
+    if (json.lot_id) json.taille_lot = tailles[json.lot_id] || 1;
+    return json;
   });
+  return avecPagination({ success: true, message, colis }, pagination);
+}
+
+/**
+ * Transitions de statut autorisées (admin). Avant : aucune règle, un colis
+ * livré pouvait repasser « en attente » et renvoyer push, SMS et e-mails.
+ *  - en_attente → recupere, livre
+ *  - recupere   → livre, en_attente (correction d'une erreur de saisie)
+ *  - livre      → (aucune : statut définitif)
+ */
+const TRANSITIONS = {
+  en_attente: ['recupere', 'livre'],
+  recupere: ['livre', 'en_attente'],
+  livre: [],
+};
+
+async function changerStatut(id, nouveauStatut, adminId, message) {
+  const colis = await Colis.findByPk(id);
+  if (!colis) return { success: false, status: 404, message: 'Colis introuvable' };
+
+  const ancienStatut = colis.statut;
+  if (ancienStatut === nouveauStatut) {
+    return { success: false, status: 409, message: `Le colis est déjà « ${STATUT_LABELS[nouveauStatut] || nouveauStatut} »` };
+  }
+  const permis = TRANSITIONS[ancienStatut] || [];
+  if (!permis.includes(nouveauStatut)) {
+    return {
+      success: false,
+      status: 409,
+      message: ancienStatut === 'livre'
+        ? 'Un colis livré ne peut plus changer de statut'
+        : `Passage de « ${STATUT_LABELS[ancienStatut] || ancienStatut} » à « ${STATUT_LABELS[nouveauStatut] || nouveauStatut} » non autorisé`,
+    };
+  }
+
+  colis.statut = nouveauStatut;
+  await colis.save();
+  await _notifierChangementStatut(
+    { id: colis.id, reference: colis.reference, expediteurId: colis.expediteurId, recepteurId: colis.recepteurId, statut: ancienStatut },
+    nouveauStatut, adminId,
+  ).catch((e) => logger.warn('Erreur historique changement statut', { error: e.message }));
+  return { success: true, message, colis };
 }
 
 class GestionColisService {
 
   //liste de tous les colis
-  static async listeTousLesColis() {
-    try {
-      const colis = await Colis.findAll({
-        include: [
-          {
-            model: Utilisateur,
-            as: 'expediteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          },
-          {
-            model: Utilisateur,
-            as: 'recepteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          }
-        ],
-        order: [['created_at', 'DESC']]
-      });
-
-      return {
-        success: true,
-        message: 'Colis récupérés avec succès',
-        colis
-      };
-
-    } catch (error) {
-      throw new Error('Erreur lors de la récupération des colis');
-    }
+  static async listeTousLesColis(query = {}) {
+    return listerColis(null, query, 'Colis récupérés avec succès');
   }
 
   // 🔹 Nombre total de colis
@@ -103,36 +182,8 @@ class GestionColisService {
   }
 
   //liste des colis recupere
-  static async listeColisRecuperes() {
-    try {
-      const colis = await Colis.findAll({
-        where: {
-          statut: 'recupere'
-        },
-        include: [
-          {
-            model: Utilisateur,
-            as: 'expediteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          },
-          {
-            model: Utilisateur,
-            as: 'recepteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          }
-        ],
-        order: [['created_at', 'DESC']]
-      });
-
-      return {
-        success: true,
-        message: 'Colis récupérés avec succès',
-        colis
-      };
-
-    } catch (error) {
-      throw new Error('Erreur lors de la récupération des colis récupérés');
-    }
+  static async listeColisRecuperes(query = {}) {
+    return listerColis('recupere', query, 'Colis récupérés avec succès');
   }
 
   //nombre de colis recuperes
@@ -155,36 +206,8 @@ class GestionColisService {
   }
 
   //liste des colis en attente
-  static async listeColisEnAttente() {
-    try {
-      const colis = await Colis.findAll({
-        where: {
-          statut: 'en_attente'
-        },
-        include: [
-          {
-            model: Utilisateur,
-            as: 'expediteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          },
-          {
-            model: Utilisateur,
-            as: 'recepteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          }
-        ],
-        order: [['created_at', 'DESC']]
-      });
-
-      return {
-        success: true,
-        message: 'Colis récupérés avec succès',
-        colis
-      };
-
-    } catch (error) {
-      throw new Error('Erreur lors de la récupération des colis en attente');
-    }
+  static async listeColisEnAttente(query = {}) {
+    return listerColis('en_attente', query, 'Colis en attente récupérés avec succès');
   }
 
   //nombre de colis en attente
@@ -207,36 +230,8 @@ class GestionColisService {
   }
 
   //liste des colis livres
-  static async listeColisLivres() {
-    try {
-      const colis = await Colis.findAll({
-        where: {
-          statut: 'livre'
-        },
-        include: [
-          {
-            model: Utilisateur,
-            as: 'expediteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          },
-          {
-            model: Utilisateur,
-            as: 'recepteur',
-            attributes: ['nom', 'prenom', 'email', 'telephone']
-          }
-        ],
-        order: [['created_at', 'DESC']]
-      });
-
-      return {
-        success: true,
-        message: 'Colis récupérés avec succès',
-        colis
-      };
-
-    } catch (error) {
-      throw new Error('Erreur lors de la récupération des colis livrés');
-    }
+  static async listeColisLivres(query = {}) {
+    return listerColis('livre', query, 'Colis livrés récupérés avec succès');
   }
 
   //nombre de colis livres
@@ -290,49 +285,17 @@ class GestionColisService {
     }
   }
 
-  // ===================== EN ATTENTE =====================
+  // ===================== CHANGEMENTS DE STATUT =====================
   static async changerEnAttente(id, adminId) {
-    try {
-      const colis = await Colis.findByPk(id);
-      if (!colis) return { success: false, message: "Colis introuvable" };
-      const ancienStatut = colis.statut;
-      colis.statut = "en_attente";
-      await colis.save();
-      await _notifierChangementStatut({ ...colis.toJSON(), statut: ancienStatut, id: colis.id, reference: colis.reference, expediteurId: colis.expediteurId, recepteurId: colis.recepteurId }, "en_attente", adminId).catch((e) => logger.warn('Erreur notification changement statut', { error: e.message }));
-      return { success: true, message: "Colis mis en attente avec succès", colis };
-    } catch (error) {
-      throw error;
-    }
+    return changerStatut(id, 'en_attente', adminId, 'Colis mis en attente avec succès');
   }
 
-  // ===================== LIVRÉ =====================
   static async changerEnLivre(id, adminId) {
-    try {
-      const colis = await Colis.findByPk(id);
-      if (!colis) return { success: false, message: "Colis introuvable" };
-      const ancienStatut = colis.statut;
-      colis.statut = "livre";
-      await colis.save();
-      await _notifierChangementStatut({ ...colis.toJSON(), statut: ancienStatut, id: colis.id, reference: colis.reference, expediteurId: colis.expediteurId, recepteurId: colis.recepteurId }, "livre", adminId).catch((e) => logger.warn('Erreur notification changement statut', { error: e.message }));
-      return { success: true, message: "Colis marqué comme livré", colis };
-    } catch (error) {
-      throw error;
-    }
+    return changerStatut(id, 'livre', adminId, 'Colis marqué comme livré');
   }
 
-  // ===================== RÉCUPÉRÉ =====================
   static async changerEnRecupere(id, adminId) {
-    try {
-      const colis = await Colis.findByPk(id);
-      if (!colis) return { success: false, message: "Colis introuvable" };
-      const ancienStatut = colis.statut;
-      colis.statut = "recupere";
-      await colis.save();
-      await _notifierChangementStatut({ ...colis.toJSON(), statut: ancienStatut, id: colis.id, reference: colis.reference, expediteurId: colis.expediteurId, recepteurId: colis.recepteurId }, "recupere", adminId).catch((e) => logger.warn('Erreur notification changement statut', { error: e.message }));
-      return { success: true, message: "Colis marqué comme récupéré", colis };
-    } catch (error) {
-      throw error;
-    }
+    return changerStatut(id, 'recupere', adminId, 'Colis marqué comme récupéré');
   }
 
 }

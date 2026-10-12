@@ -1,19 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const messageClientController = require('../controllers/messageClient.controller');
-const authMiddleware = require('../middlewares/auth.middleware');
-const isAdmin = require('../middlewares/isAdmin.middlewares');
 
-// POST /nanei/messages — client envoie un message (public)
+// POST /nanei/messages — un client (ou un visiteur) écrit au support (public)
 router.post('/', messageClientController.envoyerMessage);
 
-// GET /nanei/messages — admin consulte tous les messages
-router.get('/', authMiddleware, isAdmin, messageClientController.getTousMessages);
-
-// GET /nanei/messages/stats — nombre de messages
-router.get('/stats', authMiddleware, isAdmin, messageClientController.getNombreMessages);
-
-// POST /nanei/messages/:id/repondre — répondre par email
-router.post('/:id/repondre', authMiddleware, isAdmin, messageClientController.repondreMessage);
+// Les routes de consultation et de réponse sont réservées à l'admin et
+// n'existent QUE sous /nanei/admin/messages (messageClient.admin.route.js),
+// avec la limite de débit admin et le journal d'audit. Les doublons qui
+// existaient ici (GET /, GET /stats, POST /:id/repondre) contournaient ces
+// deux protections : ils ont été retirés.
 
 module.exports = router;

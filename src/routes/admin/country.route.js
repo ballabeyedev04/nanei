@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { paginerReponse } = require('../../utils/pagination');
 const countryController = require('../../controllers/admin/country.controller');
 const authMiddleware = require('../../middlewares/auth.middleware');
 const isAdmin = require('../../middlewares/isAdmin.middlewares');
@@ -9,7 +10,7 @@ const auditLog = require('../../middlewares/auditlog.middleware');
 router.use(authMiddleware);
 router.use(isAdmin);
 
-router.get('/', countryController.getCountries);
+router.get('/', paginerReponse('data'), countryController.getCountries); // pagination facultative ?page=&limit=
 router.get('/:id', countryController.getCountryById);
 router.post('/', auditLog('CREATE', 'Country'), countryController.createCountry);
 router.put('/:id', auditLog('UPDATE', 'Country'), countryController.updateCountry);

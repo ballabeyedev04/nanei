@@ -92,7 +92,7 @@ exports.rechercherClientController = async (req, res) => {
   const searchTerm = req.query.q; 
 
   try {
-    const result = await EnvoieColisService.rechercherClient(searchTerm);
+    const result = await EnvoieColisService.rechercherClient(searchTerm, req.user?.id);
 
     if (!result.success) {
       return res.status(400).json({
@@ -119,13 +119,13 @@ exports.getColisEnvoyesController = async (req, res) => {
     // req.user est rempli par ton middleware d'auth avec le token décodé
     const utilisateurId = req.user.id;
 
-    const result = await EnvoieColisService.getColisEnvoyes(utilisateurId);
+    const result = await EnvoieColisService.getColisEnvoyes(utilisateurId, req.query);
 
     if (!result.success) {
       return res.status(400).json({ message: result.message });
     }
 
-    return res.status(200).json({ data: result.data });
+    return res.status(200).json({ data: result.data, par_statut: result.par_statut, ...(result.pagination ? { pagination: result.pagination } : {}) });
   } catch (err) {
     logger.error('Erreur dans getColisEnvoyesController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
@@ -140,13 +140,13 @@ exports.getColisRecusController = async (req, res) => {
   try {
     const utilisateurId = req.user.id;
 
-    const result = await EnvoieColisService.getColisRecus(utilisateurId);
+    const result = await EnvoieColisService.getColisRecus(utilisateurId, req.query);
 
     if (!result.success) {
       return res.status(400).json({ message: result.message });
     }
 
-    return res.status(200).json({ data: result.data });
+    return res.status(200).json({ data: result.data, par_statut: result.par_statut, ...(result.pagination ? { pagination: result.pagination } : {}) });
   } catch (err) {
     logger.error('Erreur dans getColisRecusController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({
@@ -196,13 +196,13 @@ exports.getNotificationsController = async (req, res) => {
   try {
     const utilisateurId = req.user.id;
 
-    const result = await EnvoieColisService.getNotifications(utilisateurId);
+    const result = await EnvoieColisService.getNotifications(utilisateurId, req.query);
 
     if (!result.success) {
       return res.status(400).json({ message: result.message });
     }
 
-    return res.status(200).json({ data: result.data });
+    return res.status(200).json({ data: result.data, non_lues: result.non_lues, ...(result.pagination ? { pagination: result.pagination } : {}) });
   } catch (err) {
     logger.error('Erreur dans getNotificationsController', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({

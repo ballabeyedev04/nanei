@@ -1,4 +1,5 @@
 const { typeTransportDuColis } = require('../../utils/typeTransport');
+const { paysDepuisTelephone } = require('../../utils/paysDepuisTelephone');
 const Colis = require('../../models/colis.model');
 const logger = require('../../config/logger');
 const Utilisateur = require('../../models/utilisateur.model');
@@ -45,9 +46,9 @@ exports.genererEtiquetteClient = async (req, res) => {
       expediteurPrenom: colis.expediteur?.prenom || '',
       expediteurTelephone: colis.expediteur?.telephone || '',
       expediteurEmail: colis.expediteur?.email || '',
-      // Nanei/FrancoMaliShip expédie depuis le Mali — pas de champ pays
-      // dédié sur l'expéditeur, l'origine est fixe pour tous les colis.
-      expediteurPays: 'MALI',
+      // Pays déduit de l'indicatif du téléphone de l'expéditeur (avant : « MALI »
+      // pour tous les colis). Voir utils/paysDepuisTelephone.js.
+      expediteurPays: paysDepuisTelephone(colis.expediteur?.telephone),
       recepteurNom: colis.recepteur?.nom || '',
       recepteurPrenom: colis.recepteur?.prenom || '',
       recepteurTelephone: colis.recepteur?.telephone || '',

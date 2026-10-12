@@ -75,6 +75,16 @@ const User = sequelize.define('User', {
   photoProfil: {
     type: DataTypes.STRING(512),
     allowNull: true
+  },
+  // Compte destinataire créé automatiquement à l'envoi d'un colis (la
+  // personne ne s'est pas encore inscrite) — colonne compte_auto. Seuls ces
+  // comptes peuvent être « revendiqués » à l'inscription. Un client désactivé
+  // par un admin a compteAuto = false : personne ne peut le reprendre en se
+  // réinscrivant avec son e-mail ou son téléphone.
+  compteAuto: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
   }
 
 }, {
@@ -83,5 +93,25 @@ const User = sequelize.define('User', {
   paranoid: true,
   underscored: true
 });
+
+// Champs internes jamais envoyés au client (réponses JSON des routes admin et
+// client) : hash du mot de passe, jetons de réinitialisation, OTP, jeton push.
+// Ils restent lisibles dans le code serveur (`user.mot_de_passe`…), seule la
+// sérialisation JSON les retire.
+User.CHAMPS_PRIVES = [
+  'mot_de_passe',
+  'resetPasswordToken',
+  'resetPasswordExpires',
+  'passwordChangedAt',
+  'otpCode',
+  'otpExpires',
+  'fcm_token',
+];
+
+User.prototype.toJSON = function toJSON() {
+  const valeurs = { ...this.get() };
+  for (const champ of User.CHAMPS_PRIVES) delete valeurs[champ];
+  return valeurs;
+};
 
 module.exports = User;

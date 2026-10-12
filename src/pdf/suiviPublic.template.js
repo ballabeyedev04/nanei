@@ -1,5 +1,35 @@
 const fs = require('fs');
 const path = require('path');
+const { echapperHtml } = require('../utils/echapperHtml');
+
+/**
+ * Copie des données du colis où chaque texte saisi par un utilisateur (nom,
+ * prénom, destination, commentaire…) est échappé. La page est PUBLIQUE :
+ * avant, un client inscrit sous le prénom `<img src=x onerror=…>` injectait
+ * du HTML dans la page de suivi de chacun de ses colis, et
+ * `/nanei/suivi/<script>…` se reflétait tel quel dans la page « introuvable ».
+ */
+function proteger(colis) {
+  const partie = (p) => (p ? {
+    ...p,
+    nom: echapperHtml(p.nom),
+    prenom: echapperHtml(p.prenom),
+    telephone: p.telephone ? echapperHtml(p.telephone) : p.telephone,
+  } : p);
+  return {
+    ...colis,
+    reference: echapperHtml(colis.reference),
+    destination: colis.destination ? echapperHtml(colis.destination) : colis.destination,
+    poids: colis.poids === null || colis.poids === undefined ? colis.poids : echapperHtml(colis.poids),
+    expediteur: partie(colis.expediteur),
+    recepteur: partie(colis.recepteur),
+    historique: (colis.historique || []).map((h) => ({
+      ...h,
+      nouveau_statut: echapperHtml(h.nouveau_statut),
+      commentaire: h.commentaire ? echapperHtml(h.commentaire) : h.commentaire,
+    })),
+  };
+}
 
 const LOGO_B64 = (() => {
   try {
@@ -39,7 +69,8 @@ function formatDate(date) {
  * (scan du QR code de l'étiquette, lien partagé). Design pro aux couleurs
  * Nanei, historique complet avec horodatage de chaque changement de statut.
  */
-function suiviPublicHtml(colis) {
+function suiviPublicHtml(colisBrut) {
+  const colis = proteger(colisBrut);
   const {
     reference, statut, destination, poids, type_transport,
     created_at, expediteur, recepteur, historique = [],
@@ -460,7 +491,8 @@ function suiviPublicHtml(colis) {
  * aucun colis — même identité visuelle que la page de suivi, pour ne jamais
  * retomber sur une erreur brute illisible.
  */
-function suiviIntrouvableHtml(reference) {
+function suiviIntrouvableHtml(referenceBrute) {
+  const reference = echapperHtml(referenceBrute);
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>

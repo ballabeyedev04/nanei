@@ -1,4 +1,5 @@
 const { Avis, Colis, Utilisateur } = require('../../models');
+const { paginer, avecPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
 const { Op, fn, col, literal } = require('sequelize');
 
@@ -13,8 +14,12 @@ exports.donnerAvis = async (req, res) => {
     if (!colis_id || !note) {
       return res.status(400).json({ success: false, message: 'colis_id et note sont obligatoires' });
     }
-    if (note < 1 || note > 5) {
-      return res.status(400).json({ success: false, message: 'La note doit être entre 1 et 5' });
+    // Entier de 1 à 5. Avant : « abc » ou 4.5 passaient le contrôle
+    // (comparaisons fausses) puis échouaient en base (500) ou étaient
+    // tronqués en silence.
+    const noteEntiere = Number(note);
+    if (!Number.isInteger(noteEntiere) || noteEntiere < 1 || noteEntiere > 5) {
+      return res.status(400).json({ success: false, message: 'La note doit être un entier entre 1 et 5' });
     }
 
     // Vérifier que le colis est livré et appartient à l'utilisateur
@@ -36,7 +41,7 @@ exports.donnerAvis = async (req, res) => {
     const avis = await Avis.create({
       colis_id,
       utilisateur_id: userId,
-      note: parseInt(note, 10),
+      note: noteEntiere,
       commentaire: commentaire || null,
     });
 
@@ -50,12 +55,14 @@ exports.donnerAvis = async (req, res) => {
 // ── CLIENT : mes avis ────────────────────────────────────────────────────────
 exports.mesAvis = async (req, res) => {
   try {
-    const avis = await Avis.findAll({
+    // Pagination facultative (?page=&limit=) : sans paramètre, liste complète
+    // (le mobile s'en sert aussi pour savoir si un colis est déjà noté).
+    const { lignes: avis, pagination } = await paginer(Avis, {
       where: { utilisateur_id: req.user.id },
       include: [{ model: Colis, as: 'colis', attributes: ['reference', 'destination'] }],
       order: [['created_at', 'DESC']],
-    });
-    return res.status(200).json({ success: true, avis });
+    }, req.query);
+    return res.status(200).json(avecPagination({ success: true, avis }, pagination));
   } catch (err) {
     logger.error('Erreur dans mesAvis', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
@@ -65,28 +72,41 @@ exports.mesAvis = async (req, res) => {
 // ── ADMIN : tous les avis + stats ────────────────────────────────────────────
 exports.adminAvis = async (req, res) => {
   try {
-    const avis = await Avis.findAll({
+    // Statistiques sur TOUS les avis (calculées en base, indépendantes de la
+    // page et du filtre de note).
+    const parNote = await Avis.findAll({
+      attributes: ['note', [fn('COUNT', col('id')), 'nombre']],
+      group: ['note'],
+      raw: true,
+    });
+    const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let total = 0;
+    let somme = 0;
+    for (const ligne of parNote) {
+      const n = Number(ligne.nombre) || 0;
+      distribution[ligne.note] = n;
+      total += n;
+      somme += n * Number(ligne.note);
+    }
+    const note_moyenne = total > 0 ? Math.round((somme / total) * 10) / 10 : 0;
+
+    // Filtre facultatif ?note=1..5 sur la liste ; pagination facultative.
+    const noteFiltre = Number(req.query.note);
+    const where = Number.isInteger(noteFiltre) && noteFiltre >= 1 && noteFiltre <= 5 ? { note: noteFiltre } : {};
+    const { lignes: avis, pagination } = await paginer(Avis, {
+      where,
       include: [
         { model: Colis, as: 'colis', attributes: ['reference', 'destination'] },
         { model: Utilisateur, as: 'utilisateur', attributes: ['nom', 'prenom', 'email'] },
       ],
       order: [['created_at', 'DESC']],
-    });
+    }, req.query);
 
-    // Statistiques
-    const total = avis.length;
-    const note_moyenne = total > 0
-      ? Math.round((avis.reduce((sum, a) => sum + a.note, 0) / total) * 10) / 10
-      : 0;
-
-    const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    avis.forEach((a) => { distribution[a.note] = (distribution[a.note] || 0) + 1; });
-
-    return res.status(200).json({
+    return res.status(200).json(avecPagination({
       success: true,
       stats: { total, note_moyenne, distribution },
       avis,
-    });
+    }, pagination));
   } catch (err) {
     logger.error('Erreur dans adminAvis', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });

@@ -1,6 +1,9 @@
 const ServiceRate = require('../models/serviceRate.model');
 const Country = require('../models/country.model');
 
+// Poids >= 0, prix > 0, valeurs numériques : voir utils/validationNombres.js.
+const { erreurNombres } = require('../utils/validationNombres');
+
 class ServiceRateService {
   static async getAll() {
     const rates = await ServiceRate.findAll({
@@ -24,6 +27,8 @@ class ServiceRateService {
     if (!countryId || prixRecuperation === undefined || prixLivraison === undefined) {
       return { success: false, message: 'Tous les champs sont obligatoires' };
     }
+    const erreur = erreurNombres([['Prix récupération', data.prixRecuperation], ['Prix livraison', data.prixLivraison]]);
+    if (erreur) return { success: false, message: erreur };
 
     const country = await Country.findByPk(countryId);
     if (!country) return { success: false, message: 'Pays non trouvé' };
@@ -41,6 +46,8 @@ class ServiceRateService {
   static async update(id, data) {
     const rate = await ServiceRate.findByPk(id);
     if (!rate) return { success: false, message: 'Tarif service non trouvé' };
+    const erreur = erreurNombres([['Prix récupération', data.prixRecuperation], ['Prix livraison', data.prixLivraison]]);
+    if (erreur) return { success: false, message: erreur };
 
     await rate.update({
       prixRecuperation: data.prixRecuperation ?? rate.prixRecuperation,

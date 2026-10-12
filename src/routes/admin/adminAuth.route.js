@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const adminAuthController = require('../../controllers/adminAuth.controller');
-const { authRateLimit } = require('../../middlewares/rateLimit.middleware');
+const { motDePasseRateLimit } = require('../../middlewares/rateLimit.middleware');
 
 /**
  * Routes de réinitialisation de mot de passe pour les administrateurs.
@@ -11,8 +11,9 @@ const { authRateLimit } = require('../../middlewares/rateLimit.middleware');
  * POST /nanei/admin/reset-password    → confirmation avec token + nouveau mdp
  */
 
-// Rate limit strict : 5 tentatives / 15 min (hérite de authRateLimitConfig)
-router.post('/forgot-password', authRateLimit, adminAuthController.forgotPassword);
-router.post('/reset-password',  authRateLimit, adminAuthController.resetPassword);
+// Rate limit strict : 5 tentatives / 15 min (compteur propre aux mots de passe,
+// distinct de celui de la connexion)
+router.post('/forgot-password', motDePasseRateLimit, adminAuthController.forgotPassword);
+router.post('/reset-password',  motDePasseRateLimit, adminAuthController.resetPassword);
 
 module.exports = router;

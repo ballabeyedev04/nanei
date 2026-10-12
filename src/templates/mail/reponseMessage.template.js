@@ -1,4 +1,11 @@
+const { echapperHtml } = require('../../utils/echapperHtml');
+
+// Tous les champs sont du texte saisi (formulaire public du support ou admin) :
+// ils sont échappés, jamais insérés comme HTML.
 module.exports = function reponseMessageTemplate({ objet, messageOriginal, reponse }) {
+  objet = echapperHtml(objet);
+  messageOriginal = echapperHtml(messageOriginal);
+  reponse = echapperHtml(reponse);
   return `
 <!DOCTYPE html>
 <html lang="fr">

@@ -1,7 +1,11 @@
-const jwt = require('jsonwebtoken');
-const { jwtConfig } = require('../config/security');
-const { User: Utilisateur } = require('../models');
-
+/**
+ * Garde de rôle générique (à placer APRÈS auth.middleware, qui remplit
+ * req.user depuis la base).
+ *
+ * Avant : le module exportait aussi un `authMiddleware` jamais défini dans ce
+ * fichier (ReferenceError au premier `require`) et importait des modules
+ * inutiles. L'authentification se fait par middlewares/auth.middleware.js.
+ */
 const roleMiddleware = (roles = []) => {
   if (typeof roles === 'string') roles = [roles];
 
@@ -14,4 +18,4 @@ const roleMiddleware = (roles = []) => {
   };
 };
 
-module.exports = { authMiddleware, roleMiddleware };
+module.exports = { roleMiddleware };

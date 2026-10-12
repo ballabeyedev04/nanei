@@ -1,4 +1,20 @@
+const { Op, fn, col, where: sqlWhere } = require('sequelize');
 const Country = require('../models/country.model');
+
+/** Pays déjà existant avec ce nom (sans tenir compte de la casse) ou ce code. */
+async function doublonPays({ name, code }, saufId) {
+  const conditions = [];
+  if (name) conditions.push(sqlWhere(fn('lower', col('name')), String(name).trim().toLowerCase()));
+  if (code) conditions.push({ code: String(code).trim().toUpperCase() });
+  if (!conditions.length) return null;
+  const existant = await Country.findOne({
+    where: { [Op.or]: conditions, ...(saufId ? { id: { [Op.ne]: saufId } } : {}) },
+  });
+  if (!existant) return null;
+  return code && existant.code === String(code).trim().toUpperCase()
+    ? 'Un pays avec ce code existe déjà'
+    : 'Un pays avec ce nom existe déjà';
+}
 const logger = require('../config/logger');
 
 class CountryService {
@@ -64,20 +80,16 @@ class CountryService {
         };
       }
 
-      const existingCountry = await Country.findOne({
-        where: { code },
-      });
-
-      if (existingCountry) {
-        return {
-          success: false,
-          message: 'Un pays avec ce code existe déjà',
-        };
+      // Code comparé en MAJUSCULES (il est enregistré ainsi) : « fra » contre
+      // « FRA » donnait avant une erreur générique de contrainte unique.
+      const doublon = await doublonPays({ name, code });
+      if (doublon) {
+        return { success: false, message: doublon };
       }
 
       const country = await Country.create({
-        name,
-        code: code.toUpperCase(),
+        name: String(name).trim(),
+        code: String(code).trim().toUpperCase(),
         isActive: isActive !== false,
       });
 
@@ -109,22 +121,14 @@ class CountryService {
 
       const { name, code, isActive } = data;
 
-      if (code && code !== country.code) {
-        const existingCountry = await Country.findOne({
-          where: { code },
-        });
-
-        if (existingCountry) {
-          return {
-            success: false,
-            message: 'Un pays avec ce code existe déjà',
-          };
-        }
+      const doublon = await doublonPays({ name, code }, country.id);
+      if (doublon) {
+        return { success: false, message: doublon };
       }
 
       await country.update({
-        name: name || country.name,
-        code: code ? code.toUpperCase() : country.code,
+        name: name ? String(name).trim() : country.name,
+        code: code ? String(code).trim().toUpperCase() : country.code,
         isActive: isActive !== undefined ? isActive : country.isActive,
       });
 
@@ -150,7 +154,32 @@ class CountryService {
       if (!country) {
         return {
           success: false,
+          status: 404,
           message: 'Pays non trouvé',
+        };
+      }
+
+      // Un pays encore utilisé ne peut pas être supprimé (clés étrangères) :
+      // on le dit clairement au lieu d'un « Erreur lors de la suppression ».
+      const ShippingRate = require('../models/shippingRate.model');
+      const ServiceRate = require('../models/serviceRate.model');
+      const { ShippingPrice, ServicePrice, ContactFavori } = require('../models');
+      const [nbTransport, nbService, nbAncienTransport, nbAncienService, nbContacts] = await Promise.all([
+        ShippingRate.count({ where: { countryId: id } }),
+        ServiceRate.count({ where: { countryId: id } }),
+        ShippingPrice.count({ where: { countryId: id } }),
+        ServicePrice.count({ where: { countryId: id } }),
+        ContactFavori.count({ where: { pays_id: id } }),
+      ]);
+      const liens = [];
+      if (nbTransport + nbAncienTransport) liens.push('des tarifs de transport');
+      if (nbService + nbAncienService) liens.push('des tarifs de services');
+      if (nbContacts) liens.push(`${nbContacts} contact(s) favori(s) de clients`);
+      if (liens.length) {
+        return {
+          success: false,
+          status: 409,
+          message: `Impossible de supprimer ce pays : il a encore ${liens.join(' et ')}. Supprimez d'abord les tarifs, ou désactivez le pays.`,
         };
       }
 
@@ -164,8 +193,8 @@ class CountryService {
       logger.error('Erreur deleteCountry', { error: error.message });
       return {
         success: false,
+        status: 500,
         message: 'Erreur lors de la suppression du pays',
-        error: error.message,
       };
     }
   }

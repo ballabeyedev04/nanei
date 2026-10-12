@@ -18,28 +18,60 @@ exports.ajouterPreuve = async (req, res) => {
     const colis = await Colis.findByPk(colisId);
     if (!colis) return res.status(404).json({ success: false, message: 'Colis introuvable' });
 
+    // Une preuve de livraison n'a de sens que pour un colis livré (l'admin
+    // ne propose le bouton que pour `livre` ; le back l'impose aussi).
+    if (colis.statut !== 'livre') {
+      return res.status(409).json({ success: false, message: "Le colis doit être marqué « Livré » avant d'ajouter une preuve de livraison" });
+    }
+
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Photo obligatoire' });
     }
 
     const { commentaire, gps_lat, gps_lng } = req.body;
-    const photo_url = await uploadBufferToR2(req.file.buffer, req.file.originalname, 'nanei/preuves');
 
-    // Upsert (unique sur colis_id)
-    const [preuve, created] = await PreuveLivraison.upsert({
-      colis_id: colisId,
+    // Une seule preuve par colis. Si elle existe déjà, on ne la remplace que
+    // sur demande explicite (`remplacer=true`, après confirmation dans
+    // l'admin) : avant, tout nouvel envoi écrasait la preuve sans prévenir.
+    const existante = await PreuveLivraison.findOne({ where: { colis_id: colisId } });
+    const remplacer = String(req.body.remplacer ?? req.query.remplacer ?? '').toLowerCase() === 'true';
+    if (existante && !remplacer) {
+      return res.status(409).json({
+        success: false,
+        message: "Une preuve de livraison existe déjà pour ce colis. Confirmez le remplacement pour l'écraser.",
+        preuve: existante,
+      });
+    }
+
+    const photo_url = await uploadBufferToR2(req.file.buffer, req.file.originalname, 'nanei/preuves');
+    const valeurs = {
       photo_url,
       commentaire: commentaire || null,
       gps_lat: gps_lat ? parseFloat(gps_lat) : null,
       gps_lng: gps_lng ? parseFloat(gps_lng) : null,
-    }, { returning: true });
+    };
 
-    return res.status(created ? 201 : 200).json({
+    let preuve;
+    if (existante) {
+      // Pas de colonne updated_at : on recrée la ligne pour que created_at
+      // soit la date de la NOUVELLE photo (affichée « Enregistrée le … »).
+      const sequelize = PreuveLivraison.sequelize;
+      preuve = await sequelize.transaction(async (t) => {
+        await existante.destroy({ transaction: t });
+        return PreuveLivraison.create({ colis_id: colisId, ...valeurs }, { transaction: t });
+      });
+      logger.info('Preuve de livraison remplacée', { colis_id: colisId, admin_id: req.user?.id });
+    } else {
+      preuve = await PreuveLivraison.create({ colis_id: colisId, ...valeurs });
+    }
+
+    return res.status(existante ? 200 : 201).json({
       success: true,
-      message: created ? 'Preuve ajoutée' : 'Preuve mise à jour',
+      message: existante ? 'Preuve remplacée' : 'Preuve ajoutée',
       preuve,
     });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
     logger.error('Erreur dans ajouterPreuve', { error: err.message, stack: err.stack, user_id: req.user?.id });
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }

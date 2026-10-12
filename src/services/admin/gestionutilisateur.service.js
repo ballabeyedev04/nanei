@@ -1,20 +1,30 @@
 ﻿const { Op } = require('sequelize');
+const { paginer, motifRecherche } = require('../../utils/pagination');
 const Utilisateur = require('../../models/utilisateur.model');
 
 class GestionUtilisateurService {
 
   // 🔹 Lister utilisateurs Particuliers
-  static async listeUtilisateur() {
+  // Query : page, limit (pagination facultative), q (nom, prénom, e-mail, téléphone)
+  static async listeUtilisateur(query = {}) {
     try {
-      const utilisateurs = await Utilisateur.findAll({
+      const motif = motifRecherche(query.q);
+      return await paginer(Utilisateur, {
         where: {
-          role: 'Particulier'
+          role: 'Particulier',
+          // Les comptes destinataires automatiques ne sont pas des clients
+          // inscrits : ils sont exclus des listes et des compteurs.
+          compteAuto: false,
+          ...(motif ? { [Op.or]: [
+            { nom: { [Op.iLike]: motif } },
+            { prenom: { [Op.iLike]: motif } },
+            { email: { [Op.iLike]: motif } },
+            { telephone: { [Op.iLike]: motif } },
+          ] } : {}),
         },
-        attributes: { exclude: ['mot_de_passe'] },
+        attributes: { exclude: Utilisateur.CHAMPS_PRIVES },
         order: [['created_at', 'DESC']]
-      });
-
-      return utilisateurs;
+      }, query);
 
     } catch (error) {
       throw new Error('Erreur lors de la récupération des utilisateurs');
@@ -27,8 +37,17 @@ class GestionUtilisateurService {
     try {
       const utilisateur = await Utilisateur.findByPk(id);
 
-      if (!utilisateur) {
+      // Route réservée aux clients : un compte Admin se gère par
+      // /admin/activer-admin (garde-fous propres aux administrateurs).
+      if (!utilisateur || utilisateur.role === 'Admin') {
         throw new Error('Utilisateur non trouvé');
+      }
+
+      // Compte destinataire jamais revendiqué : l'activer bloquerait
+      // l'inscription de la personne (« email déjà utilisé ») sans lui donner
+      // de mot de passe. Elle doit s'inscrire elle-même.
+      if (utilisateur.compteAuto) {
+        throw new Error("Ce compte destinataire n'a pas encore été créé par la personne : elle doit s'inscrire dans l'application");
       }
 
       if (utilisateur.statut === 'actif') {
@@ -38,8 +57,7 @@ class GestionUtilisateurService {
       utilisateur.statut = 'actif';
       await utilisateur.save();
 
-      const { mot_de_passe, ...userSafe } = utilisateur.toJSON();
-      return userSafe;
+      return utilisateur.toJSON();
 
     } catch (error) {
       throw new Error(error.message);
@@ -51,7 +69,9 @@ class GestionUtilisateurService {
     try {
       const utilisateur = await Utilisateur.findByPk(id);
 
-      if (!utilisateur) {
+      // Route réservée aux clients : désactiver un admin passe par
+      // /admin/desactiver-admin (interdit sur soi-même et sur le dernier admin).
+      if (!utilisateur || utilisateur.role === 'Admin') {
         throw new Error('Utilisateur non trouvé');
       }
 
@@ -62,8 +82,7 @@ class GestionUtilisateurService {
       utilisateur.statut = 'inactif';
       await utilisateur.save();
 
-      const { mot_de_passe, ...userSafe } = utilisateur.toJSON();
-      return userSafe;
+      return utilisateur.toJSON();
 
     } catch (error) {
       throw new Error(error.message);
@@ -75,7 +94,10 @@ class GestionUtilisateurService {
     try {
       const total = await Utilisateur.count({
         where: {
-          role: 'Particulier'
+          role: 'Particulier',
+          // Les comptes destinataires automatiques ne sont pas des clients
+          // inscrits : ils sont exclus des listes et des compteurs.
+          compteAuto: false
         }
       });
 
@@ -89,15 +111,20 @@ class GestionUtilisateurService {
   // 🔹 Rechercher utilisateur
   static async rechercherUtilisateur({ nom, prenom, email }) {
     try {
-      const where = { role: 'Particulier' };
+      // Insensible à la casse, % et _ saisis pris littéralement (avant : LIKE
+      // brut, « dupont » ne trouvait pas « Dupont »).
+      const where = { role: 'Particulier',
+          // Les comptes destinataires automatiques ne sont pas des clients
+          // inscrits : ils sont exclus des listes et des compteurs.
+          compteAuto: false };
 
-      if (nom) where.nom = { [Op.like]: `%${nom}%` };
-      if (prenom) where.prenom = { [Op.like]: `%${prenom}%` };
-      if (email) where.email = { [Op.like]: `%${email}%` };
+      if (motifRecherche(nom)) where.nom = { [Op.iLike]: motifRecherche(nom) };
+      if (motifRecherche(prenom)) where.prenom = { [Op.iLike]: motifRecherche(prenom) };
+      if (motifRecherche(email)) where.email = { [Op.iLike]: motifRecherche(email) };
 
       const utilisateurs = await Utilisateur.findAll({
         where,
-        attributes: { exclude: ['mot_de_passe'] },
+        attributes: { exclude: Utilisateur.CHAMPS_PRIVES },
         order: [['created_at', 'DESC']]
       });
 

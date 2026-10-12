@@ -11,7 +11,7 @@ exports.getNombreMessages = async (req, res) => {
 
 exports.getTousMessages = async (req, res) => {
   try {
-    const result = await service.getTousMessages();
+    const result = await service.getTousMessages(req.query);
     return res.status(200).json(result);
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Erreur serveur.', error: error.message });

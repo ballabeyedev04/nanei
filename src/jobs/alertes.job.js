@@ -8,8 +8,13 @@ const { Op } = require('sequelize');
 const { Colis, Utilisateur } = require('../models');
 const { sendEmail } = require('../services/resend.service');
 const logger = require('../config/logger');
+const { echapperHtml } = require('../utils/echapperHtml');
 
-cron.schedule('0 8 * * *', async () => {
+/**
+ * Envoie à l'admin la liste des colis en attente depuis plus de 3 jours.
+ * Renvoie le nombre de colis signalés (0 si aucun e-mail envoyé).
+ */
+async function verifierColisEnAttente() {
   logger.info('[Job Alertes] Démarrage vérification colis en attente');
 
   try {
@@ -29,22 +34,25 @@ cron.schedule('0 8 * * *', async () => {
 
     if (colis.length === 0) {
       logger.info('[Job Alertes] Aucun colis en attente depuis plus de 3 jours');
-      return;
+      return 0;
     }
 
     const adminEmail = process.env.EMAIL_ADMIN;
     if (!adminEmail) {
       logger.warn('[Job Alertes] EMAIL_ADMIN non défini — email non envoyé');
-      return;
+      return 0;
     }
 
     const lignes = colis.map((c) => {
-      const exp = c.expediteur ? `${c.expediteur.prenom} ${c.expediteur.nom}` : '—';
-      const date = c.created_at ? new Date(c.created_at).toLocaleDateString('fr-FR') : '—';
+      // Nom et destination saisis par le client : échappés (e-mail HTML).
+      const exp = c.expediteur ? echapperHtml(`${c.expediteur.prenom} ${c.expediteur.nom}`) : '—';
+      // Attribut Sequelize `createdAt` (colonne created_at, modèle underscored) :
+      // `c.created_at` valait toujours undefined → « — » dans chaque ligne.
+      const date = c.createdAt ? new Date(c.createdAt).toLocaleDateString('fr-FR') : '—';
       return `<tr>
-        <td style="padding:6px 10px;border-bottom:1px solid #EEE;">${c.reference}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #EEE;">${echapperHtml(c.reference)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid #EEE;">${exp}</td>
-        <td style="padding:6px 10px;border-bottom:1px solid #EEE;">${c.destination}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #EEE;">${echapperHtml(c.destination)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid #EEE;">${date}</td>
       </tr>`;
     }).join('');
@@ -73,9 +81,15 @@ cron.schedule('0 8 * * *', async () => {
     });
 
     logger.info('[Job Alertes] Email envoyé', { nb_colis: colis.length });
+    return colis.length;
   } catch (err) {
     logger.error('[Job Alertes] Erreur', { error: err.message, stack: err.stack });
+    return 0;
   }
-});
+}
 
-logger.info('[Job Alertes] Planifié — tous les jours à 8h00');;
+cron.schedule('0 8 * * *', verifierColisEnAttente);
+
+logger.info('[Job Alertes] Planifié — tous les jours à 8h00');
+
+module.exports = { verifierColisEnAttente };

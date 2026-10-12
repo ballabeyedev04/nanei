@@ -11,7 +11,22 @@ const {
   jwtConfig,
 } = require('../config/security');
 
+// Connexion — 5 tentatives / 15 min par IP (anti force brute).
 const authRateLimit = rateLimit(authRateLimitConfig);
+
+// Compteurs SÉPARÉS : avant, une seule instance (5 / 15 min / IP) était
+// partagée par login, refresh et mots de passe oubliés. Quelques
+// renouvellements de session suffisaient à bloquer la connexion des autres
+// utilisateurs derrière la même IP (NAT opérateur, bureau).
+// Renouvellement de session : un refresh token valide est déjà requis.
+const refreshRateLimit = rateLimit({
+  ...authRateLimitConfig,
+  max: 30,
+  message: { message: 'Trop de renouvellements de session. Veuillez réessayer dans quelques minutes.' },
+});
+
+// Mot de passe oublié / réinitialisation (mobile et admin) — 5 / 15 min par IP.
+const motDePasseRateLimit = rateLimit(authRateLimitConfig);
 
 // Mutations sensibles (modifier profil, changer mdp, supprimer compte) — 20 req / 15 min par IP
 const mutationRateLimit = rateLimit(mutationRateLimitConfig);
@@ -60,6 +75,8 @@ const suiviPublicRateLimit = rateLimit(suiviPublicRateLimitConfig);
 
 module.exports = {
   authRateLimit,
+  refreshRateLimit,
+  motDePasseRateLimit,
   authenticatedRateLimit,
   mutationRateLimit,
   adminRateLimit,

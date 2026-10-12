@@ -1,5 +1,6 @@
 const ServicePriceService = require('../../services/servicePrice.service');
 const logger = require('../../config/logger');
+const { statutEchec } = require('../../utils/statutHttp');
 
 exports.getServicePrices = async (req, res) => {
   try {
@@ -12,7 +13,7 @@ exports.getServicePrices = async (req, res) => {
     const result = await ServicePriceService.getServicePrices(filters);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(200).json({
@@ -35,7 +36,7 @@ exports.getServicePriceById = async (req, res) => {
     const result = await ServicePriceService.getServicePriceById(id);
 
     if (!result.success) {
-      return res.status(404).json(result);
+      return res.status(statutEchec(result, 404)).json(result);
     }
 
     return res.status(200).json({
@@ -56,7 +57,7 @@ exports.createServicePrice = async (req, res) => {
     const result = await ServicePriceService.createServicePrice(req.body);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(201).json(result);
@@ -76,7 +77,7 @@ exports.updateServicePrice = async (req, res) => {
     const result = await ServicePriceService.updateServicePrice(id, req.body);
 
     if (!result.success) {
-      return res.status(400).json(result);
+      return res.status(statutEchec(result, 400)).json(result);
     }
 
     return res.status(200).json(result);
@@ -96,7 +97,7 @@ exports.deleteServicePrice = async (req, res) => {
     const result = await ServicePriceService.deleteServicePrice(id);
 
     if (!result.success) {
-      return res.status(404).json(result);
+      return res.status(statutEchec(result, 404)).json(result);
     }
 
     return res.status(200).json(result);

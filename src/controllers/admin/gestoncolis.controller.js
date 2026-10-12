@@ -4,7 +4,7 @@ const logger = require('../../config/logger');
 /* ===================== LISTE TOUS LES COLIS ===================== */
 exports.listeTousLesColis = async (req, res) => {
   try {
-    const result = await GestionColisService.listeTousLesColis();
+    const result = await GestionColisService.listeTousLesColis(req.query);
 
     return res.status(200).json(result);
   } catch (error) {
@@ -36,7 +36,7 @@ exports.nombreColis = async (req, res) => {
 /* ===================== COLIS EN ATTENTE ===================== */
 exports.listeColisEnAttente = async (req, res) => {
   try {
-    const result = await GestionColisService.listeColisEnAttente();
+    const result = await GestionColisService.listeColisEnAttente(req.query);
     return res.status(200).json(result);
   } catch (error) {
     return res.status(500).json({
@@ -66,7 +66,7 @@ exports.nombreColisEnAttente = async (req, res) => {
 /* ===================== COLIS LIVRÉS ===================== */
 exports.listeColisLivres = async (req, res) => {
   try {
-    const result = await GestionColisService.listeColisLivres();
+    const result = await GestionColisService.listeColisLivres(req.query);
     return res.status(200).json(result);
   } catch (error) {
     return res.status(500).json({
@@ -96,7 +96,7 @@ exports.nombreColisLivres = async (req, res) => {
 /* ===================== COLIS RÉCUPÉRÉS ===================== */
 exports.listeColisRecuperes = async (req, res) => {
   try {
-    const result = await GestionColisService.listeColisRecuperes();
+    const result = await GestionColisService.listeColisRecuperes(req.query);
     return res.status(200).json(result);
   } catch (error) {
     return res.status(500).json({
@@ -146,7 +146,7 @@ exports.changerEnAttente = async (req, res) => {
     const { id } = req.params;
     const adminId = req.user?.id;
     const result = await GestionColisService.changerEnAttente(id, adminId);
-    if (!result.success) return res.status(404).json(result);
+    if (!result.success) { const { status = 404, ...corps } = result; return res.status(status).json(corps); }
     logger.info('Statut colis modifié', { colis_id: id, nouveau_statut: 'en_attente', admin_id: adminId });
     return res.status(200).json(result);
   } catch (error) {
@@ -162,7 +162,7 @@ exports.changerEnLivre = async (req, res) => {
     const { id } = req.params;
     const adminId = req.user?.id;
     const result = await GestionColisService.changerEnLivre(id, adminId);
-    if (!result.success) return res.status(404).json(result);
+    if (!result.success) { const { status = 404, ...corps } = result; return res.status(status).json(corps); }
     logger.info('Statut colis modifié', { colis_id: id, nouveau_statut: 'livre', admin_id: adminId });
     return res.status(200).json(result);
   } catch (error) {
@@ -178,7 +178,7 @@ exports.changerEnRecupere = async (req, res) => {
     const { id } = req.params;
     const adminId = req.user?.id;
     const result = await GestionColisService.changerEnRecupere(id, adminId);
-    if (!result.success) return res.status(404).json(result);
+    if (!result.success) { const { status = 404, ...corps } = result; return res.status(status).json(corps); }
     logger.info('Statut colis modifié', { colis_id: id, nouveau_statut: 'recupere', admin_id: adminId });
     return res.status(200).json(result);
   } catch (error) {

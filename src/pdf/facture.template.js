@@ -1,5 +1,6 @@
 const fs   = require('fs');
 const path = require('path');
+const { echapperHtml } = require('../utils/echapperHtml');
 
 const LOGO_B64 = (() => {
   try {
@@ -13,7 +14,12 @@ const LOGO_B64 = (() => {
 /**
  * Génère le HTML de la facture de paiement — design orange Nanei.
  */
-function factureHtml(data) {
+function factureHtml(donnees) {
+  // Textes saisis (nom du payeur, destination, type de colis) échappés : le
+  // HTML est rendu par Chromium côté serveur.
+  const data = Object.fromEntries(Object.entries(donnees).map(([k, v]) => [
+    k, typeof v === 'string' ? echapperHtml(v) : v,
+  ]));
   const {
     factureNumero, dateEmission,
     colisReference, destination, poids, typeColis,

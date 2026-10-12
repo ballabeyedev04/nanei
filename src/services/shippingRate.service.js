@@ -5,6 +5,9 @@ const WITH_COUNTRY = {
   include: [{ model: Country, as: 'country', attributes: ['id', 'name', 'code'] }],
 };
 
+// Poids >= 0, prix > 0, valeurs numériques : voir utils/validationNombres.js.
+const { erreurNombres } = require('../utils/validationNombres');
+
 class ShippingRateService {
   static async getAll(filters = {}) {
     const where = {};
@@ -26,6 +29,13 @@ class ShippingRateService {
         minWeightMaritime == null || maxWeightMaritime == null || priceMaritimePerKg == null) {
       return { success: false, message: 'Tous les champs sont obligatoires (aérien + maritime)' };
     }
+    const erreur = erreurNombres([
+      ['Poids min. aérien', minWeightAerien], ['Poids max. aérien', maxWeightAerien, { strict: true }],
+      ['Prix aérien / kg', priceAerienPerKg, { strict: true }],
+      ['Poids min. maritime', minWeightMaritime], ['Poids max. maritime', maxWeightMaritime, { strict: true }],
+      ['Prix maritime / kg', priceMaritimePerKg, { strict: true }],
+    ]);
+    if (erreur) return { success: false, message: erreur };
     if (parseFloat(minWeightAerien) >= parseFloat(maxWeightAerien)) {
       return { success: false, message: 'Poids min aérien doit être < poids max aérien' };
     }
@@ -48,16 +58,30 @@ class ShippingRateService {
     const rate = await ShippingRate.findByPk(id);
     if (!rate) return { success: false, message: 'Tarif non trouvé' };
 
-    const { minWeightAerien, maxWeightAerien, priceAerienPerKg, minWeightMaritime, maxWeightMaritime, priceMaritimePerKg, countryId } = body;
+    const { minWeightAerien, maxWeightAerien, priceAerienPerKg, minWeightMaritime, maxWeightMaritime, priceMaritimePerKg } = body;
+    const erreur = erreurNombres([
+      ['Poids min. aérien', minWeightAerien], ['Poids max. aérien', maxWeightAerien, { strict: true }],
+      ['Prix aérien / kg', priceAerienPerKg, { strict: true }],
+      ['Poids min. maritime', minWeightMaritime], ['Poids max. maritime', maxWeightMaritime, { strict: true }],
+      ['Prix maritime / kg', priceMaritimePerKg, { strict: true }],
+    ]);
+    if (erreur) return { success: false, message: erreur };
 
-    if (minWeightAerien != null && maxWeightAerien != null && parseFloat(minWeightAerien) >= parseFloat(maxWeightAerien)) {
+    // Comparaison sur les valeurs FINALES (saisie fusionnée avec l'existant) :
+    // avant, ne modifier que le max (ex. max 1 kg alors que min = 5 kg)
+    // enregistrait une plage vide sans erreur.
+    const final = (v, actuel) => Number(v ?? actuel);
+    if (final(minWeightAerien, rate.minWeightAerien) >= final(maxWeightAerien, rate.maxWeightAerien)) {
       return { success: false, message: 'Poids min aérien doit être < poids max aérien' };
     }
-    if (minWeightMaritime != null && maxWeightMaritime != null && parseFloat(minWeightMaritime) >= parseFloat(maxWeightMaritime)) {
+    if (final(minWeightMaritime, rate.minWeightMaritime) >= final(maxWeightMaritime, rate.maxWeightMaritime)) {
       return { success: false, message: 'Poids min maritime doit être < poids max maritime' };
     }
 
-    await rate.update({ countryId: countryId ?? rate.countryId, minWeightAerien: minWeightAerien ?? rate.minWeightAerien, maxWeightAerien: maxWeightAerien ?? rate.maxWeightAerien, priceAerienPerKg: priceAerienPerKg ?? rate.priceAerienPerKg, minWeightMaritime: minWeightMaritime ?? rate.minWeightMaritime, maxWeightMaritime: maxWeightMaritime ?? rate.maxWeightMaritime, priceMaritimePerKg: priceMaritimePerKg ?? rate.priceMaritimePerKg });
+    // Le pays d'un tarif ne change pas (un tarif par pays) : `countryId` est
+    // ignoré, comme pour les tarifs de services. Avant, il était accepté sans
+    // contrôle (pays inexistant ou deuxième tarif pour un même pays possibles).
+    await rate.update({ minWeightAerien: minWeightAerien ?? rate.minWeightAerien, maxWeightAerien: maxWeightAerien ?? rate.maxWeightAerien, priceAerienPerKg: priceAerienPerKg ?? rate.priceAerienPerKg, minWeightMaritime: minWeightMaritime ?? rate.minWeightMaritime, maxWeightMaritime: maxWeightMaritime ?? rate.maxWeightMaritime, priceMaritimePerKg: priceMaritimePerKg ?? rate.priceMaritimePerKg });
     const full = await ShippingRate.findByPk(id, WITH_COUNTRY);
     return { success: true, message: 'Tarif mis à jour', data: full };
   }
