@@ -21,4 +21,8 @@ module.exports = {
   clearMocks: true,
   restoreMocks: true,
   testTimeout: 20000,
+  // Chaque worker charge toute l'application (app.js + modèles) : avec un
+  // worker par cœur, un poste à 8 Go saturait (« Jest worker ran out of
+  // memory »). La moitié des cœurs suffit et reste stable.
+  maxWorkers: '50%',
 };

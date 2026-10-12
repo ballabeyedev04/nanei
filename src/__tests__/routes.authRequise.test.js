@@ -107,7 +107,7 @@ describe('authentification des routes', () => {
 
   it('app.js ne déclare directement qu’une seule route, publique : GET /health', () => {
     // Sonde de l'orchestrateur (Docker / deploy/release.sh) : ne renvoie que
-    // { status: 'OK' }. Toute autre route doit passer par un routeur, donc
+    // { status, db, version, api } (voir health.controller.test.js). Toute autre route doit passer par un routeur, donc
     // par les contrôles ci-dessus.
     const src = fs.readFileSync(path.join(SRC, 'app.js'), 'utf8');
     const directes = [...src.matchAll(/app\.(get|post|put|patch|delete|all)\(\s*'([^']+)'/g)].map(([, m, c]) => `${m.toUpperCase()} ${c}`);

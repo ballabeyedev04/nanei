@@ -7,7 +7,7 @@ const { RAPPORTS_DIR, preparerDossierRapports } = require('../utils/rapportsStoc
 const { echapperHtml } = require('../utils/echapperHtml');
 const path = require('path');
 const fs = require('fs');
-const { Op, fn, col, literal } = require('sequelize');
+const { Op } = require('sequelize');
 const htmlToPdf = require('../utils/htmlToPdf');
 // Paiement n'est pas exporté par models/index.js : import direct (sinon
 // Paiement.findAll plantait et aucun rapport ne pouvait être généré).
@@ -150,7 +150,7 @@ cron.schedule('0 6 1 * *', async () => {
   logger.info('[Job Rapport] Démarrage génération rapport mensuel');
 
   try {
-    const { buffer, filename, moisLabel, caTotal, nbColis } = await genererRapportMensuel();
+    const { filename, moisLabel, caTotal, nbColis } = await genererRapportMensuel();
 
     const adminEmail = process.env.EMAIL_ADMIN;
     if (!adminEmail) {

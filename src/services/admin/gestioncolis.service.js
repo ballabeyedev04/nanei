@@ -177,7 +177,7 @@ class GestionColisService {
       };
 
     } catch (error) {
-      throw new Error('Erreur lors du comptage des colis');
+      throw new Error('Erreur lors du comptage des colis', { cause: error });
     }
   }
 
@@ -201,7 +201,7 @@ class GestionColisService {
       };
 
     } catch (error) {
-      throw new Error('Erreur lors du comptage des colis récupérés');
+      throw new Error('Erreur lors du comptage des colis récupérés', { cause: error });
     }
   }
 
@@ -225,7 +225,7 @@ class GestionColisService {
       };
 
     } catch (error) {
-      throw new Error('Erreur lors du comptage des colis en attente');
+      throw new Error('Erreur lors du comptage des colis en attente', { cause: error });
     }
   }
 
@@ -249,7 +249,7 @@ class GestionColisService {
       };
 
     } catch (error) {
-      throw new Error('Erreur lors du comptage des colis livrés');
+      throw new Error('Erreur lors du comptage des colis livrés', { cause: error });
     }
   }
 
@@ -281,7 +281,7 @@ class GestionColisService {
       };
 
     } catch (error) {
-      throw new Error('Erreur lors de la recherche du colis');
+      throw new Error('Erreur lors de la recherche du colis', { cause: error });
     }
   }
 

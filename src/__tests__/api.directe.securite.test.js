@@ -149,9 +149,11 @@ describe('jetons invalides, périmés ou détournés', () => {
 
 describe('fichiers et routes hors /nanei', () => {
   it('GET /health répond OK sans jeton', async () => {
+    // La sonde interroge la base (voir health.controller.test.js) : doublée ici.
+    jest.spyOn(require('../config/db'), 'authenticate').mockResolvedValue();
     const r = await request(app).get('/health');
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ status: 'OK' });
+    expect(r.body).toMatchObject({ status: 'OK', db: 'ok' });
   });
 
   it('les rapports financiers ne sont jamais servis en statique (/uploads/rapports → 404)', async () => {

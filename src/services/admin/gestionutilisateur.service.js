@@ -27,7 +27,7 @@ class GestionUtilisateurService {
       }, query);
 
     } catch (error) {
-      throw new Error('Erreur lors de la récupération des utilisateurs');
+      throw new Error('Erreur lors de la récupération des utilisateurs', { cause: error });
     }
   }
 
@@ -60,7 +60,7 @@ class GestionUtilisateurService {
       return utilisateur.toJSON();
 
     } catch (error) {
-      throw new Error(error.message);
+      throw new Error(error.message, { cause: error });
     }
   }
 
@@ -85,7 +85,7 @@ class GestionUtilisateurService {
       return utilisateur.toJSON();
 
     } catch (error) {
-      throw new Error(error.message);
+      throw new Error(error.message, { cause: error });
     }
   }
 
@@ -104,7 +104,7 @@ class GestionUtilisateurService {
       return total;
 
     } catch (error) {
-      throw new Error('Erreur lors du comptage des utilisateurs');
+      throw new Error('Erreur lors du comptage des utilisateurs', { cause: error });
     }
   }
 
@@ -131,7 +131,7 @@ class GestionUtilisateurService {
       return utilisateurs;
 
     } catch (error) {
-      throw new Error('Erreur lors de la recherche des utilisateurs');
+      throw new Error('Erreur lors de la recherche des utilisateurs', { cause: error });
     }
   }
 

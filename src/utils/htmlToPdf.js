@@ -61,7 +61,7 @@ function acquireSlot() {
     activeRenders++;
     return Promise.resolve();
   }
-  return new Promise((resolve) => waitQueue.push(resolve));
+  return new Promise((resolve) => { waitQueue.push(resolve); });
 }
 
 function releaseSlot() {
@@ -93,6 +93,7 @@ async function htmlToPdf(html, options = {}) {
     page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 20000 });
     if (waitForFonts) {
+      // eslint-disable-next-line no-undef -- exécuté dans Chromium (page.evaluate), où `document` existe
       await page.evaluate(() => document.fonts.ready);
     }
     const buffer = await page.pdf({ format, printBackground: true, margin });

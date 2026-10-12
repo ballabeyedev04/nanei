@@ -1,5 +1,4 @@
 const AdminPaiementService = require('../../services/admin/paiement.service');
-const logger = require('../../config/logger');
 
 exports.listePaiements = async (req, res) => {
   try {

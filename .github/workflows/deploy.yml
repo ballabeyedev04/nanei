@@ -1,65 +1,854 @@
-name: Deploy to VPS
+# ═══════════════════════════════════════════════════════════════════════════
+#  Nanei — chaîne de déploiement du back (API Node / PostgreSQL, VPS)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#   1. Contrôles d'entrée ─┬─ 2a. Analyse (ESLint) ──────────────┐
+#                          ├─ 2b. Tests unitaires ───────────────┤
+#                          ├─ 2c. Intégration (PostgreSQL 16) ───┼─ 3. Image Docker : construction & contrôle
+#                          └─ 2d. Sécurité ──────────────────────┘            │
+#                                                          4. Test de démarrage de CETTE image
+#                                                                              │
+#                                                          5a. Vérification du serveur (sans rien modifier)
+#                                                                              │
+#                                     5b. ✋ Approbation → mise en service (retour arrière automatique)
+#                                                                              │
+#                                                                         6. Bilan
+#
+#   Déployer       : git push origin main
+#   Essai à blanc  : Actions > « Back — déploiement VPS » > Run workflow (tout sauf 5b)
+#   Retour arrière : Actions > « Back — retour arrière » (.github/workflows/rollback.yml)
+#   Procédure      : deploy/README.md
+
+name: Back — déploiement VPS
+run-name: >-
+  ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '🧪 Essai à blanc' || '🚀 Déploiement' }}
+  — ${{ github.ref_name }} @ ${{ github.sha }}
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Essai à blanc : tout est construit, testé et le serveur vérifié, mais rien n'est mis en service"
+        type: boolean
+        default: true
+
+# Un seul déploiement à la fois, dans l'ordre (même groupe que rollback.yml) :
+# deux mises en service simultanées se marcheraient dessus. Le serveur a en
+# plus son propre verrou (flock dans deploy/release.sh).
+concurrency:
+  group: back-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  POSTGRES_IMAGE: postgres:16-alpine # même version que docker-compose.prod.yml
 
 jobs:
-  # Aucun déploiement ne part si un test échoue : `deploy` dépend de `test`.
-  # Les tests d'intégration (src/__tests__/integration) sont sautés ici, faute
-  # de NANEI_TEST_DB_NAME ; les tests de parité mobile / admin aussi (dépôts
-  # voisins absents). Voir src/__tests__/README.md.
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-
+  # ─────────────────────────────────────────────────────────────────────────
+  controles:
+    name: 1 · Contrôles d'entrée
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # lecture de la configuration de l'environnement « production »
+    outputs:
+      dry_run: ${{ steps.mode.outputs.dry_run }}
+      image: ${{ steps.image.outputs.image }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Node 22
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          fetch-depth: 0 # historique : origine du commit, migrations depuis le dernier déploiement
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+
+      - name: Mode
+        id: mode
+        run: |
+          DRY_RUN="${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+          {
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "## 🧪 Essai à blanc"
+              echo "Toute la chaîne est exécutée (image construite, testée, serveur vérifié), mais **rien n'est mis en service**."
+            else
+              echo "## 🚀 Déploiement du back en production"
+            fi
+            echo ""
+            echo "### 🚦 Contrôles d'entrée"
+            echo ""
+            echo "| Contrôle | Résultat | |"
+            echo "|---|---|:---:|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Le commit est sur main
+        run: |
+          # fetch-depth: 0 : origin/main est déjà là (pas de fetch : pas de jeton conservé).
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "| Origine | commit \`${GITHUB_SHA::7}\` présent sur \`main\` — $(git log -1 --format='%s' "$GITHUB_SHA" | sed 's/|/\\|/g') | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Origine | commit \`${GITHUB_SHA::7}\` absent de \`main\` | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Seul du code présent sur main peut être déployé."
+            exit 1
+          fi
+
+      - name: Image visée
+        id: image
+        run: |
+          # GHCR exige des minuscules.
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/nanei-api:${GITHUB_SHA}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "| Image | \`$IMAGE\` | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Migrations depuis le dernier déploiement
+        run: |
+          DERNIER_TAG="$(git tag --list 'back-v*' --sort=-creatordate | head -1)"
+          if [ -n "$DERNIER_TAG" ]; then
+            NOUVELLES="$(git diff --name-only --diff-filter=A "$DERNIER_TAG" "$GITHUB_SHA" -- src/migrations/ | xargs -r -n1 basename | paste -sd, - || true)"
+            MODIFIEES="$(git diff --name-only --diff-filter=MD "$DERNIER_TAG" "$GITHUB_SHA" -- src/migrations/ | xargs -r -n1 basename | paste -sd, - || true)"
+            echo "| Migrations nouvelles depuis \`$DERNIER_TAG\` | ${NOUVELLES:-aucune} | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "$MODIFIEES" ]; then
+              # Une migration déjà appliquée en production ne se rejoue pas :
+              # la modifier n'a aucun effet en production, mais en a sur une
+              # base neuve — divergence silencieuse.
+              echo "| Migrations déjà déployées MODIFIÉES ou supprimées | $MODIFIEES | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::Migrations déjà déployées modifiées : $MODIFIEES — créer une nouvelle migration plutôt que modifier une ancienne."
+            fi
+          else
+            echo "| Migrations | premier déploiement par cette chaîne (aucun tag \`back-v*\`) | ℹ️ |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Approbation exigée sur l'environnement « production »
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          REGLES="$(gh api "repos/$GITHUB_REPOSITORY/environments/production" --jq '[.protection_rules[]?.type] | join(",")' 2>/dev/null)"
+          CODE=$?
+          set -e
+          if [ "$CODE" -ne 0 ]; then
+            echo "| Environnement \`production\` | absent — il sera créé SANS relecteur au premier déploiement | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::L'environnement « production » n'existe pas : ajoutez des relecteurs requis (Settings > Environments) AVANT le premier déploiement, sinon la mise en service part sans approbation."
+          elif [[ ",$REGLES," == *",required_reviewers,"* ]]; then
+            echo "| Environnement \`production\` | relecteurs requis configurés | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Environnement \`production\` | aucun relecteur requis | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::L'environnement « production » n'exige aucune approbation : ajoutez des relecteurs requis (Settings > Environments > production)."
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  analyse:
+    name: 2a · Analyse du code (ESLint)
+    needs: controles
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
-
       - name: Dépendances
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
-      - name: Tests
-        run: npm test
+      - name: ESLint
+        run: |
+          set +e
+          npx eslint . --format json --output-file eslint.json
+          CODE=$?
+          set -e
+          ERREURS=$(node -e 'const r=require("./eslint.json");console.log(r.reduce((n,f)=>n+f.errorCount,0))')
+          AVERTISSEMENTS=$(node -e 'const r=require("./eslint.json");console.log(r.reduce((n,f)=>n+f.warningCount,0))')
+          {
+            echo "### 🧹 Analyse du code (ESLint)"
+            echo ""
+            echo "| Erreurs | Avertissements |"
+            echo "|:---:|:---:|"
+            echo "| $([ "$ERREURS" -eq 0 ] && echo "✅ 0" || echo "❌ $ERREURS") | $([ "$AVERTISSEMENTS" -eq 0 ] && echo "✅ 0" || echo "⚠️ $AVERTISSEMENTS") |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CODE" -ne 0 ]; then
+            {
+              echo "| Fichier | Ligne | Règle | Message |"
+              echo "|---|---:|---|---|"
+              node -e '
+                const r = require("./eslint.json"), racine = process.cwd() + "/";
+                for (const f of r) for (const m of f.messages.filter((x) => x.severity === 2).slice(0, 10))
+                  console.log(`| \`${f.filePath.replace(racine, "")}\` | ${m.line} | ${m.ruleId || "syntaxe"} | ${m.message.replace(/\|/g, "\\|")} |`);'
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            npx eslint . || true
+            echo "::error::ESLint a trouvé des erreurs (détail ci-dessus et dans le résumé). Lancer « npm run lint » en local."
+            exit 1
+          fi
 
-  deploy:
-    name: Deploy
-    needs: test
-    runs-on: ubuntu-latest
-
+  # ─────────────────────────────────────────────────────────────────────────
+  tests:
+    name: 2b · Tests unitaires
+    needs: controles
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 15
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          # Le build Docker peut dépasser les 10 minutes par défaut
-          # d'appleboy/ssh-action et couper la connexion SSH avant même
-          # d'arriver à `docker compose up -d` (vu sur le backend Sign).
-          command_timeout: "30m"
-          script: |
-            set -e
-            cd /var/www/nanei-api
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Dépendances
+        run: npm ci --no-audit --no-fund
 
-            # Récupérer le nouveau code — `set -e` fait échouer tout le
-            # déploiement si le pull échoue, au lieu de continuer
-            # silencieusement avec l'ancien code.
-            # --rebase : évite un conflit de branches divergentes si le VPS
-            # a un jour un commit local (config spécifique à la machine).
-            git pull --rebase origin main
+      # Les tests de parité mobile / admin sont sautés ici (dépôts voisins
+      # absents) ; ceux d'intégration tournent dans le job 2c.
+      - name: Tests
+        run: npx jest --ci --json --outputFile=jest.json
 
-            # Mise en service : build de la nouvelle image, sauvegarde de la
-            # base, MIGRATIONS AUTOMATIQUES (src/migrations/) puis redémarrage
-            # du backend et contrôle /health. Si une migration échoue,
-            # l'ancienne version reste en ligne et ce job passe en échec.
-            # Détail et ordre des étapes : deploy/release.sh
-            bash deploy/release.sh
+      - name: Rapport
+        if: always()
+        run: |
+          if [ ! -f jest.json ]; then
+            echo "### 🧪 Tests unitaires : ❌ pas de rapport (Jest n'a pas pu se lancer)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node -e '
+            const r = require("./jest.json");
+            const l = [
+              "### 🧪 Tests unitaires", "",
+              "| Réussis | Échoués | Sautés | Suites |", "|:---:|:---:|:---:|:---:|",
+              `| ✅ ${r.numPassedTests} | ${r.numFailedTests ? "❌ " + r.numFailedTests : "✅ 0"} | ⏭️ ${r.numPendingTests} | ${r.numPassedTestSuites}/${r.numTotalTestSuites} |`, "",
+            ];
+            const echecs = r.testResults.flatMap((s) => s.assertionResults.filter((a) => a.status === "failed").map((a) => `- \`${s.name.replace(process.cwd() + "/", "")}\` — ${a.fullName}`));
+            if (echecs.length) l.push("**Échecs :**", ...echecs.slice(0, 20), "");
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, l.join("\n") + "\n");'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  integration:
+    name: 2c · Intégration (PostgreSQL 16 réel)
+    needs: controles
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine # même version que docker-compose.prod.yml
+        env:
+          POSTGRES_DB: nanei_ci_test
+          POSTGRES_USER: nanei_ci
+          POSTGRES_PASSWORD: ci-jetable # base éphémère du job, sans aucune donnée réelle
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nanei_ci -d nanei_ci_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_USER: nanei_ci
+      DB_PASSWORD: ci-jetable
+      DB_NAME: nanei_ci_test
+      NANEI_TEST_DB_HOST: 127.0.0.1
+      NANEI_TEST_DB_PORT: "5432"
+      NANEI_TEST_DB_USER: nanei_ci
+      NANEI_TEST_DB_PASSWORD: ci-jetable
+      NANEI_TEST_DB_NAME: nanei_ci_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Dépendances
+        run: npm ci --no-audit --no-fund
+
+      - name: Migrations sur base vide (nouvelle installation)
+        id: migrations
+        run: npm run test:migrations
+
+      # Mêmes tests que « npm run test:integration:local » (vus verts en
+      # local sur PostgreSQL 16 avant d'être câblés ici).
+      - name: Parcours complet sur PostgreSQL réel
+        id: integration
+        run: npx jest src/__tests__/integration --runInBand --ci --json --outputFile=integration.json
+
+      - name: Rapport
+        if: always()
+        run: |
+          {
+            echo "### 🐘 Intégration (PostgreSQL 16 réel)"
+            echo ""
+            echo "| Contrôle | Résultat |"
+            echo "|---|:---:|"
+            echo "| Migrations sur base vide, puis rien en attente, schéma conforme aux modèles | $([ '${{ steps.migrations.outcome }}' = success ] && echo ✅ || echo ❌) |"
+            if [ -f integration.json ]; then
+              node -e 'const r=require("./integration.json");console.log(`| Parcours complet : ${r.numPassedTests} réussis, ${r.numFailedTests} échoués, ${r.numPendingTests} sautés | ${r.numFailedTests===0 && r.numPendingTests===0 && r.numPassedTests>0 ? "✅" : "❌"} |`)'
+            else
+              echo "| Parcours complet | ❌ |"
+            fi
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Garde-fou : des tests d'intégration « sautés » ici voudraient dire
+          # que la base n'a pas été vue (variable perdue) — c'est un échec.
+          if [ -f integration.json ]; then
+            node -e 'const r=require("./integration.json"); if (r.numPendingTests>0 || r.numPassedTests===0) { console.log("::error::Tests d intégration sautés : la base n a pas été utilisée."); process.exit(1); }'
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  securite:
+    name: 2d · Sécurité
+    needs: controles
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Secrets oubliés dans le code (Gitleaks)
+        run: |
+          {
+            echo "### 🔐 Sécurité"
+            echo ""
+            echo "| Contrôle | Résultat | |"
+            echo "|---|---|:---:|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # --user : le rapport est écrit avec les droits de la machine, pas de root.
+          if docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+               dir /repo --config /repo/.gitleaks.toml --redact --no-banner --verbose \
+               --report-format json --report-path /repo/gitleaks.json --exit-code 1; then
+            echo "| Secrets dans le code | aucun | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Secrets dans le code | secret(s) détecté(s) — détail ci-dessous | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo ""
+              echo "| Fichier | Ligne | Règle |"
+              echo "|---|---:|---|"
+              jq -r '.[] | "| `\(.File | sub("^/repo/"; ""))` | \(.StartLine) | \(.RuleID) |"' gitleaks.json || true
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Un possible secret a été trouvé (fichier et ligne dans le résumé). Vrai secret : retirez-le du code ET changez-le, il est compromis. Faux positif : ajoutez une exception justifiée dans .gitleaks.toml."
+            exit 1
+          fi
+
+      # Bloquant : une faille haute ou critique dans une dépendance de
+      # PRODUCTION (celles embarquées dans l'image) arrête le déploiement.
+      - name: Failles des dépendances de production (npm audit)
+        run: |
+          set +e
+          npm audit --omit=dev --audit-level=high > audit.txt 2>&1
+          CODE=$?
+          set -e
+          RESUME_AUDIT="$(grep -E '^[0-9]+ (low|moderate|high|critical|vulnerabilit)' audit.txt | tail -1 || true)"
+          if [ "$CODE" -eq 0 ]; then
+            echo "| npm audit (production, seuil : haute) | aucune faille haute ou critique${RESUME_AUDIT:+ — $RESUME_AUDIT} | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| npm audit (production, seuil : haute) | ${RESUME_AUDIT:-faille(s) haute(s) ou critique(s)} | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+            { echo ""; echo "<details><summary>Détail npm audit</summary>"; echo ""; echo '```'; cat audit.txt; echo '```'; echo "</details>"; echo ""; } >> "$GITHUB_STEP_SUMMARY"
+            cat audit.txt
+            echo "::error::Faille haute ou critique dans une dépendance de production : mettre à jour la dépendance (npm audit fix, ou version corrigée)."
+            exit 1
+          fi
+
+      # Non bloquant : base OSV plus large (failles modérées, dépendances de
+      # développement) ; signalé pour décision.
+      - name: Failles connues des dépendances (OSV-Scanner)
+        run: |
+          set +e
+          docker run --rm -v "$PWD:/src" ghcr.io/google/osv-scanner:v2.6.0 \
+            scan source --lockfile=/src/package-lock.json --format=markdown > osv.md 2>osv.log
+          CODE=$?
+          set -e
+          if [ "$CODE" -eq 0 ]; then
+            echo "| Failles connues des dépendances (OSV) | aucune | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$CODE" -eq 1 ]; then
+            echo "| Failles connues des dépendances (OSV) | faille(s) signalée(s) — détail ci-dessous | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Des failles connues touchent des dépendances : voir le résumé."
+            { echo ""; echo "<details><summary>Détail OSV-Scanner</summary>"; echo ""; cat osv.md; echo "</details>"; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Failles connues des dépendances (OSV) | analyse impossible (code $CODE) | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
+            cat osv.log
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  construction:
+    name: 3 · Image Docker (construction & contrôle)
+    needs: [controles, analyse, tests, integration, securite]
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # pousser l'image sur GHCR
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      IMAGE: ${{ needs.controles.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Construite UNE fois, à partir du commit testé, étiquetée par son sha :
+      # c'est exactement cette image qui sera testée (4) puis mise en service (5b).
+      - name: Construction et envoi sur GHCR
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          # Manifeste d'image simple (sans attestation jointe) : lu tel quel
+          # par docker pull / docker image inspect sur le serveur.
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Contrôle de l'image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          REF="${IMAGE}@${DIGEST}"
+          docker pull --quiet "$REF" > /dev/null
+          ligne() { echo "| $1 | $2 | $3 |" >> "$GITHUB_STEP_SUMMARY"; }
+          ECHEC=0
+          ko() { ligne "$1" "$2" "❌"; echo "::error::Image : $1 — $2"; ECHEC=1; }
+          {
+            echo "### 📦 Image Docker"
+            echo ""
+            echo "| Contrôle | Résultat | |"
+            echo "|---|---|:---:|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          REVISION="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$REF")"
+          [ "$REVISION" = "$GITHUB_SHA" ] && ligne "Étiquette de commit" "\`${REVISION::7}\`" "✅" || ko "Étiquette de commit" "« $REVISION » ≠ $GITHUB_SHA"
+
+          ENV_SHA="$(docker image inspect --format '{{ range .Config.Env }}{{ println . }}{{ end }}' "$REF" | sed -n 's/^GIT_SHA=//p')"
+          [ "$ENV_SHA" = "$GITHUB_SHA" ] && ligne "GIT_SHA (version exposée par /health)" "\`${ENV_SHA::7}\`" "✅" || ko "GIT_SHA" "« $ENV_SHA »"
+
+          UTILISATEUR="$(docker image inspect --format '{{ .Config.User }}' "$REF")"
+          [ "$UTILISATEUR" = "node" ] && ligne "Utilisateur" "node (non root)" "✅" || ko "Utilisateur" "« $UTILISATEUR » (attendu node)"
+
+          TAILLE=$(( $(docker image inspect --format '{{ .Size }}' "$REF") / 1024 / 1024 ))
+          ligne "Taille" "${TAILLE} Mo" "ℹ️"
+
+          # Contenu : ce qui doit y être, ce qui ne doit JAMAIS y être.
+          CONTENU="$(docker run --rm --entrypoint sh "$REF" -c '
+            echo "node=$(node -p process.versions.node)"
+            for f in .env .git src/__tests__ scripts node_modules/jest node_modules/eslint node_modules/embedded-postgres deploy; do
+              [ -e "$f" ] && echo "interdit=$f"
+            done
+            for f in src/server.js src/app.js src/migrations package.json node_modules/.bin/sequelize; do
+              [ -e "$f" ] || echo "manquant=$f"
+            done
+            npm ls --omit=dev --depth=0 > /dev/null 2>&1 || echo "deps=incompletes"
+            node -e "require(\"bcrypt\"); require(\"pg\")" 2>/dev/null || echo "natif=ko"
+          ')"
+          echo "$CONTENU"
+          NODE="$(sed -n 's/^node=//p' <<<"$CONTENU")"
+          [[ "$NODE" == 22.* ]] && ligne "Node" "$NODE" "✅" || ko "Node" "« $NODE » (attendu 22.x)"
+          INTERDITS="$(sed -n 's/^interdit=//p' <<<"$CONTENU" | paste -sd, -)"
+          [ -z "$INTERDITS" ] && ligne "Fichiers exclus (.env, .git, tests, outils de dev)" "absents" "✅" || ko "Fichiers à exclure présents" "$INTERDITS"
+          MANQUANTS="$(sed -n 's/^manquant=//p' <<<"$CONTENU" | paste -sd, -)"
+          [ -z "$MANQUANTS" ] && ligne "Code, migrations, sequelize-cli" "présents" "✅" || ko "Fichiers manquants" "$MANQUANTS"
+          grep -q '^deps=incompletes' <<<"$CONTENU" && ko "Dépendances de production" "incomplètes (npm ls)" || ligne "Dépendances de production" "complètes (npm ls)" "✅"
+          grep -q '^natif=ko' <<<"$CONTENU" && ko "Modules natifs (bcrypt, pg)" "chargement impossible" || ligne "Modules natifs (bcrypt, pg)" "chargés" "✅"
+
+          ligne "Référence" "\`${REF}\`" "📦"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          exit "$ECHEC"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  demarrage:
+    name: 4 · Test de démarrage de l'image
+    needs: [controles, construction]
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read # tirer l'image de GHCR
+    services:
+      postgres:
+        image: postgres:16-alpine # même version que docker-compose.prod.yml
+        env:
+          POSTGRES_DB: nanei_ci
+          POSTGRES_USER: nanei_ci
+          POSTGRES_PASSWORD: ci-jetable # base éphémère du job, sans aucune donnée réelle
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nanei_ci -d nanei_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      REF: ${{ needs.controles.outputs.image }}@${{ needs.construction.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configuration de test (comme le .env de production, valeurs jetables)
+        run: |
+          docker pull --quiet "$REF" > /dev/null
+          ADMIN_PASSWORD="Ci-$(openssl rand -hex 12)-A1!"
+          echo "::add-mask::$ADMIN_PASSWORD"
+          {
+            echo "NODE_ENV=production"
+            echo "PORT=3000"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=5432"
+            echo "DB_NAME=nanei_ci"
+            echo "DB_USER=nanei_ci"
+            echo "DB_PASSWORD=ci-jetable"
+            echo "DB_SSL_CA="
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "JWT_REFRESH_SECRET=$(openssl rand -hex 32)"
+            echo "JWT_RESET_SECRET=$(openssl rand -hex 32)"
+            echo "CORS_ORIGIN=https://admin.ci.invalid"
+            echo "FRONTEND_URL=https://admin.ci.invalid"
+            echo "BACKEND_URL=http://127.0.0.1:3000"
+            echo "LOG_DIR=/app/logs"
+            echo "ADMIN_EMAIL=admin@ci.invalid"
+            echo "ADMIN_PASSWORD=$ADMIN_PASSWORD"
+          } > "$RUNNER_TEMP/ci.env"
+          echo "ADMIN_EMAIL=admin@ci.invalid" >> "$GITHUB_ENV"
+          echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$GITHUB_ENV"
+          {
+            echo "### 🚀 Test de démarrage de l'image"
+            echo ""
+            echo "Image \`$REF\` + PostgreSQL 16 vierge, configuration de production (valeurs jetables)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Même commande que deploy/release.sh, avec la même image.
+      - name: Migrations avec l'image
+        run: |
+          set -o pipefail
+          docker run --rm --network host --env-file "$RUNNER_TEMP/ci.env" "$REF" npm run migrate 2>&1 | tee migrations.txt
+          docker run --rm --network host --env-file "$RUNNER_TEMP/ci.env" "$REF" npm run migrate 2>&1 | tee migrations-bis.txt
+          grep -q "No migrations were executed" migrations-bis.txt \
+            || { echo "::error::Des migrations restent à appliquer après un premier passage."; exit 1; }
+          N=$(grep -c ': migrated' migrations.txt || true)
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Migrations sur base vide : **$N appliquées**, second passage : rien à faire ✅" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Démarrage du conteneur
+        run: |
+          docker run -d --name nanei-ci --network host --env-file "$RUNNER_TEMP/ci.env" "$REF"
+
+      - name: Appels de contrôle (/health, routes publique et protégées, connexion)
+        run: bash scripts/ci/test-demarrage.sh http://127.0.0.1:3000 "$GITHUB_SHA"
+
+      - name: Santé vue par Docker (HEALTHCHECK de l'image)
+        run: |
+          for _ in $(seq 1 30); do
+            ETAT="$(docker inspect --format '{{ .State.Health.Status }}' nanei-ci)"
+            [ "$ETAT" = "healthy" ] && break
+            [ "$(docker inspect --format '{{ .State.Running }}' nanei-ci)" = "true" ] || { echo "::error::Le conteneur s'est arrêté"; exit 1; }
+            sleep 5
+          done
+          echo "| Docker HEALTHCHECK | $ETAT | $([ "$ETAT" = healthy ] && echo ✅ || echo ❌) |" >> "$GITHUB_STEP_SUMMARY"
+          [ "$ETAT" = "healthy" ] || { echo "::error::Le HEALTHCHECK de l'image n'est pas « healthy » ($ETAT)"; exit 1; }
+          REDEMARRAGES="$(docker inspect --format '{{ .RestartCount }}' nanei-ci)"
+          [ "$REDEMARRAGES" = "0" ] || { echo "::error::Le conteneur a redémarré $REDEMARRAGES fois"; exit 1; }
+
+      - name: Journaux du conteneur
+        if: always()
+        run: |
+          docker logs nanei-ci > demarrage.log 2>&1 || true
+          ERREURS="$(grep -ciE '"level":"error"|\berror\b' demarrage.log || true)"
+          {
+            echo ""
+            echo "<details><summary>Journaux du démarrage (${ERREURS} ligne(s) d'erreur)</summary>"
+            echo ""
+            echo '```'
+            tail -n 60 demarrage.log
+            echo '```'
+            echo "</details>"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker rm -f nanei-ci > /dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP/ci.env"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-demarrage
+          path: |
+            demarrage.log
+            migrations.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ─────────────────────────────────────────────────────────────────────────
+  verification-serveur:
+    name: 5a · Vérification du serveur
+    needs: [controles, demarrage]
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read # le serveur tire l'image avec ce jeton
+    env:
+      IMAGE: ${{ needs.controles.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+
+      - name: Accès SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: bash scripts/ci/preparer-ssh.sh
+
+      # Rien n'est modifié en service : prérequis, fichiers suivis intacts,
+      # accès à GHCR depuis le serveur (l'image y est tirée), espace disque.
+      - name: Contrôle préalable sur le serveur
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/ssh-distant.sh verifier "$IMAGE" "$GITHUB_SHA" serveur.log
+
+      - name: Résumé
+        if: always()
+        run: |
+          {
+            echo "### 🖥️ Vérification du serveur"
+            echo ""
+            if grep -q '^RESULTAT issue=verifie' serveur.log 2>/dev/null; then
+              echo "✅ Serveur prêt : prérequis, fichiers suivis intacts, accès GHCR et image vérifiés. Rien n'a été modifié en service."
+            else
+              echo "❌ Le serveur n'est pas prêt : $(grep -E '❌' serveur.log 2>/dev/null | tail -1 | sed 's/^\[serveur\] [0-9:]* — //' || echo 'voir le journal de l étape')"
+            fi
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$HOME/.ssh/nanei_vps"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  mise-en-service:
+    name: 5b · Approbation & mise en service
+    needs: [controles, construction, demarrage, verification-serveur]
+    if: needs.controles.outputs.dry_run != 'true'
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 40
+    # ✋ L'environnement « production » exige l'approbation d'un relecteur
+    # (Settings > Environments > production) : le job attend ce clic.
+    environment:
+      name: production
+      url: ${{ vars.API_URL }}
+    permissions:
+      contents: write # tag + Release GitHub du déploiement
+      packages: read # le serveur tire l'image avec ce jeton
+    env:
+      IMAGE: ${{ needs.controles.outputs.image }}
+      DIGEST: ${{ needs.construction.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # tags précédents (notes de la Release)
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+
+      - name: Accès SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: bash scripts/ci/preparer-ssh.sh
+
+      # Sur le serveur (deploy/ci-distant.sh puis deploy/release.sh) :
+      # fichiers au commit exact, image tirée, sauvegarde, migrations,
+      # redémarrage, vérification /health (db + version), retour arrière
+      # automatique si la vérification échoue.
+      - name: Mise en service sur le serveur
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/ssh-distant.sh deployer "$IMAGE" "$GITHUB_SHA" deploiement.log
+
+      - name: Vérification publique (via Nginx)
+        env:
+          API_URL: ${{ vars.API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "::warning::Variable GitHub API_URL absente : vérification publique sautée (voir deploy/README.md)."
+            echo "PUBLIC=non vérifiée (variable API_URL absente)" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          for _ in $(seq 1 10); do
+            CORPS="$(curl -fsS --max-time 10 "${API_URL%/}/health" || true)"
+            if grep -q "\"version\":\"$GITHUB_SHA\"" <<<"$CORPS" && grep -q '"db":"ok"' <<<"$CORPS"; then
+              echo "PUBLIC=$CORPS" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::${API_URL%/}/health ne renvoie pas la version $GITHUB_SHA (reçu : ${CORPS:-rien}). Le serveur la sert pourtant en local : vérifier Nginx."
+          exit 1
+
+      - name: Trace du déploiement (tag + Release GitHub)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          r() { sed -n "s/^RESULTAT $1=//p" deploiement.log | tail -1; }
+          TAG="back-v$(date -u +%Y.%m.%d-%H%M)-${GITHUB_SHA::7}"
+          PRECEDENT="$(git tag --list 'back-v*' --sort=-creatordate | head -1)"
+          {
+            echo "## Back Nanei — \`${GITHUB_SHA::7}\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`$GITHUB_SHA\` — $(git log -1 --format='%s' "$GITHUB_SHA" | sed 's/|/\\|/g') |"
+            echo "| Image | \`$IMAGE\` |"
+            echo "| Empreinte | \`$DIGEST\` |"
+            echo "| Migrations appliquées | $(r migrations) |"
+            echo "| Sauvegarde avant migration (serveur) | \`$(r sauvegarde)\` |"
+            echo "| Version précédente | \`$(r precedente_sha)\` (\`$(r precedente_image)\`) |"
+            echo "| /health | \`$(r sante)\` |"
+            echo "| Déclenché par | @$GITHUB_ACTOR — [exécution]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) |"
+            echo ""
+            if [ -n "$PRECEDENT" ]; then
+              echo "### Commits depuis \`$PRECEDENT\`"
+              echo ""
+              git log --format='- %h %s' "$PRECEDENT..$GITHUB_SHA" | head -50
+            fi
+            echo ""
+            echo "Retour arrière : Actions > « Back — retour arrière », version \`$TAG\` (ou une précédente)."
+          } > release.md
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "Back $TAG" --notes-file release.md
+          echo "RELEASE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_ENV"
+
+      - name: Résumé
+        if: always()
+        run: |
+          r() { sed -n "s/^RESULTAT $1=//p" deploiement.log 2>/dev/null | tail -1; }
+          ISSUE="$(r issue)"
+          TRACE="${RELEASE_URL:-}"
+          [ -n "$TRACE" ] || TRACE="non créée (voir l'étape « Trace du déploiement »)"
+          PUBLIC="${PUBLIC:-non vérifiée}"
+          {
+            echo "### 🛫 Mise en service"
+            echo ""
+            case "$ISSUE" in
+              succes)
+                echo "✅ **\`${GITHUB_SHA::7}\` en service** et vérifié (db ok, bonne version)."
+                echo ""
+                echo "| | |"
+                echo "|---|---|"
+                echo "| Migrations appliquées | $(r migrations) |"
+                echo "| Sauvegarde avant migration (serveur) | \`$(r sauvegarde)\` |"
+                echo "| Version précédente | \`$(r precedente_sha)\` |"
+                echo "| /health (serveur) | \`$(r sante)\` |"
+                echo "| /health (public) | \`$PUBLIC\` |"
+                echo "| Trace | $TRACE |"
+                ;;
+              echec-retour-arriere-ok)
+                echo "❌ **Déploiement échoué — RETOUR ARRIÈRE AUTOMATIQUE effectué** : la version précédente \`$(r precedente_sha)\` est de nouveau en service et vérifiée."
+                echo ""
+                echo "- Réponse de la nouvelle version : \`$(r sante_nouvelle)\`"
+                echo "- Migrations appliquées (non annulées, rétrocompatibles) : $(r migrations)"
+                echo "- La base **n'a pas été restaurée**. Sauvegarde prise avant migration : \`$(r sauvegarde)\` — commande de restauration dans le journal de l'étape « Mise en service sur le serveur » (à n'utiliser qu'en connaissance de cause)."
+                ;;
+              echec-retour-arriere-ko|echec-sans-retour)
+                echo "🚨 **BACKEND HORS SERVICE** : la nouvelle version ET la précédente ne répondent pas. Intervention manuelle immédiate : deploy/README.md, « Dépannage »."
+                echo ""
+                echo "- Sauvegarde avant migration : \`$(r sauvegarde)\`"
+                ;;
+              echec-migrations)
+                echo "❌ **Échec des migrations** : rien n'a été redémarré, l'ancienne version est toujours en service. Sauvegarde : \`$(r sauvegarde)\`."
+                ;;
+              "")
+                echo "❌ **Mise en service non effectuée** (job annulé, approbation refusée, accès SSH ou serveur) — voir le journal."
+                ;;
+              *)
+                echo "❌ **Mise en service non effectuée** ($ISSUE) : rien n'a été modifié en service — voir le journal de l'étape « Mise en service sur le serveur »."
+                ;;
+            esac
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$HOME/.ssh/nanei_vps"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: journal-mise-en-service
+          path: deploiement.log
+          retention-days: 90
+          if-no-files-found: ignore
+
+  # ─────────────────────────────────────────────────────────────────────────
+  bilan:
+    name: 6 · Bilan
+    if: always()
+    needs: [controles, analyse, tests, integration, securite, construction, demarrage, verification-serveur, mise-en-service]
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 5
+    steps:
+      - name: Bilan
+        env:
+          DRY_RUN: ${{ needs.controles.outputs.dry_run }}
+          IMAGE: ${{ needs.controles.outputs.image }}
+        run: |
+          icone() { case "$1" in success) echo "✅";; failure) echo "❌";; cancelled) echo "⏹️";; skipped) echo "⏭️";; *) echo "❔";; esac; }
+          {
+            echo "## 📋 Bilan du déploiement"
+            echo ""
+            echo "| Étape | Résultat |"
+            echo "|---|:---:|"
+            echo "| 1 · Contrôles d'entrée | $(icone '${{ needs.controles.result }}') |"
+            echo "| 2a · Analyse du code (ESLint) | $(icone '${{ needs.analyse.result }}') |"
+            echo "| 2b · Tests unitaires | $(icone '${{ needs.tests.result }}') |"
+            echo "| 2c · Intégration (PostgreSQL 16) | $(icone '${{ needs.integration.result }}') |"
+            echo "| 2d · Sécurité | $(icone '${{ needs.securite.result }}') |"
+            echo "| 3 · Image Docker | $(icone '${{ needs.construction.result }}') |"
+            echo "| 4 · Test de démarrage de l'image | $(icone '${{ needs.demarrage.result }}') |"
+            echo "| 5a · Vérification du serveur | $(icone '${{ needs.verification-serveur.result }}') |"
+            echo "| 5b · Approbation & mise en service | $(icone '${{ needs.mise-en-service.result }}') |"
+            echo ""
+            if [ "$DRY_RUN" = "true" ]; then
+              if [ "${{ needs.verification-serveur.result }}" = "success" ]; then
+                echo "🧪 **Essai à blanc réussi** — \`$IMAGE\` est prête à être mise en service (push sur main, ou relancer sans essai à blanc)."
+              else
+                echo "🧪 **Essai à blanc en échec** — ouvrez l'étape en ❌."
+              fi
+            elif [ "${{ needs.mise-en-service.result }}" = "success" ]; then
+              echo "🎉 **\`${GITHUB_SHA::7}\` en service en production.**"
+            elif [ "${{ needs.mise-en-service.result }}" = "failure" ]; then
+              echo "🛑 **Mise en service en échec** — voir « 5b » ci-dessus : retour arrière automatique effectué ou non, sauvegarde, commande de restauration."
+            else
+              echo "🛑 **Rien n'a été mis en service.** Ouvrez l'étape en ❌ pour le détail — procédure : deploy/README.md."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

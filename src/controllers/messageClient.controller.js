@@ -1,5 +1,4 @@
 const messageClientService = require('../services/messageClient.service');
-const logger = require('../config/logger');
 const { email: emailSchema } = require('../validations/common');
 
 exports.envoyerMessage = async (req, res) => {

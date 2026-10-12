@@ -3,7 +3,6 @@ const { paysDepuisTelephone } = require('../../utils/paysDepuisTelephone');
 const Colis = require('../../models/colis.model');
 const logger = require('../../config/logger');
 const Utilisateur = require('../../models/utilisateur.model');
-const Country = require('../../models/country.model');
 const { genererEtiquette } = require('../../pdf/etiquette.template');
 const { genererEtiquetteZPL } = require('../../pdf/etiquette.zpl');
 

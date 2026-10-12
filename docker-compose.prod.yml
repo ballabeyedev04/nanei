@@ -1,6 +1,11 @@
 # ============================================================
 #  Nanei API — Docker Compose PRODUCTION
-#  Usage : docker compose -f docker-compose.prod.yml up -d --build
+#  Mise en service : deploy/release.sh (appelé par la chaîne GitHub, via
+#  deploy/ci-distant.sh). L'image du backend est construite et testée par
+#  le CI, puis TIRÉE depuis GHCR : NANEI_IMAGE=ghcr.io/<owner>/<repo>/nanei-api:<sha>.
+#  Sans NANEI_IMAGE : nanei-api:latest, que release.sh fait toujours pointer
+#  sur la version en service (commandes manuelles : ps, logs, restart…).
+#  Construction manuelle de secours : bash deploy/release.sh deployer local <sha>
 #
 #  Prérequis :
 #   • Fichier .env rempli (copie de .env.example)
@@ -43,11 +48,13 @@ services:
 
   # ── Backend Node.js ────────────────────────────────────────────────────────
   backend:
+    # build : conservé pour une construction locale / manuelle uniquement
+    # (docker compose -f docker-compose.prod.yml build). En production,
+    # l'image vient de GHCR (voir en-tête).
     build:
       context: .
       dockerfile: Dockerfile
-      # Pas de cache lors d'un déploiement propre : ajouter --no-cache si besoin
-    image: nanei-api:latest
+    image: ${NANEI_IMAGE:-nanei-api:latest}
     container_name: nanei_backend
     restart: unless-stopped
     depends_on:

@@ -9,10 +9,17 @@ npx jest -t "webhook"         # les tests dont le nom contient « webhook »
 TEST_LOGS=1 npm test          # avec les journaux winston (silencieux par défaut)
 ```
 
-La CI (`.github/workflows/deploy.yml`, job `test`, Node 22) lance `npm ci && npm test` ;
-le job `deploy` en dépend (`needs: test`) : aucun déploiement si un test échoue.
+La chaîne de déploiement (`.github/workflows/deploy.yml`, Node 22) lance `npm test` (étape 2b)
+et les tests d'intégration sur un vrai PostgreSQL 16 (étape 2c) : aucun déploiement si un test échoue
+(voir deploy/README.md, Partie A).
 
 ## Tests d'intégration (PostgreSQL réel)
+
+**Le plus simple** : `npm run test:integration:local` démarre un vrai PostgreSQL 16 jetable
+(paquet `embedded-postgres`, sans Docker ni installation), vérifie les migrations sur base
+vide (`scripts/verifier-migrations.js`), lance `integration/`, puis arrête et efface la base.
+
+Avec une base existante :
 
 Le dossier `integration/` est **sauté** tant que `NANEI_TEST_DB_NAME` n'est pas défini.
 Il faut une base **jetable** : ses tables sont recréées (`sequelize.sync({ force: true })`),

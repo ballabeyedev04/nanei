@@ -1,7 +1,7 @@
 const Joi = require('joi');
 
 const telephone = Joi.string()
-  .pattern(/^\+?[0-9\s\-\.]{7,20}$/)
+  .pattern(/^\+?[0-9\s\-.]{7,20}$/)
   .message('{{#label}} doit être un numéro de téléphone valide');
 
 const motDePasse = Joi.string()

@@ -94,10 +94,11 @@ require('./jobs/rapport.job');
 app.use('/uploads/rapports', (req, res) => res.status(404).json({ success: false, message: 'Fichier introuvable' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// SÉCURITÉ: Healthcheck pour orchestrateurs (Docker, K8s)
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK' });
-});
+// Sonde de santé (Docker HEALTHCHECK, deploy/release.sh, chaîne de
+// déploiement, admin) : interroge réellement la base et renvoie le commit en
+// service et la version du contrat d'API. Détail : controllers/health.controller.js
+const { sante } = require('./controllers/health.controller');
+app.get('/health', sante);
 
 // Compat mobile : certains écrans de l'app construisent déjà une URL de
 // base finissant par /nanei puis y ajoutent un chemin qui recommence par

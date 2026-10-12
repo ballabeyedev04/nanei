@@ -1,7 +1,7 @@
 const { Avis, Colis, Utilisateur } = require('../../models');
 const { paginer, avecPagination } = require('../../utils/pagination');
 const logger = require('../../config/logger');
-const { Op, fn, col, literal } = require('sequelize');
+const { fn, col } = require('sequelize');
 
 // ── CLIENT : donner un avis ──────────────────────────────────────────────────
 exports.donnerAvis = async (req, res) => {

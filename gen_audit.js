@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const htmlToPdf = require('./src/utils/htmlToPdf');
 const path = require('path');
 const fs = require('fs');
 
@@ -987,21 +987,14 @@ const html = `<!DOCTYPE html>
 </body>
 </html>`;
 
+// Rendu par l'utilitaire du projet (puppeteer-core + @sparticuz/chromium,
+// dépendances déclarées). Avant : require('puppeteer'), paquet absent de
+// package.json — le script plantait dès son lancement (trouvé par ESLint,
+// règle n/no-missing-require).
 (async () => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
-  await page.evaluate(() => document.fonts.ready);
-  const buf = await page.pdf({
-    format: 'A4',
-    printBackground: true,
-    margin: { top: '0', right: '0', bottom: '0', left: '0' },
-  });
-  await browser.close();
-  const out = path.join('C:', 'Users', 'vPro', 'Downloads', 'Audit_Fonctionnel_Nanei.pdf');
+  const buf = await htmlToPdf(html, { waitForFonts: true });
+  const out = process.argv[2] || path.join('C:', 'Users', 'vPro', 'Downloads', 'Audit_Fonctionnel_Nanei.pdf');
   fs.writeFileSync(out, buf);
   console.log('OK', buf.length, 'bytes →', out);
+  process.exit(0); // le navigateur mutualisé de htmlToPdf reste ouvert sinon
 })().catch(e => { console.error(e.message); process.exit(1); });

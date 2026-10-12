@@ -1,0 +1,19 @@
+# Recherche de secrets (workflow deploy.yml, étape 2d · Sécurité).
+# Règles par défaut de Gitleaks, plus les exceptions justifiées ci-dessous.
+# Une exception se justifie TOUJOURS en clair ; un vrai secret trouvé se
+# retire du code ET se change (il est compromis dès qu'il a été poussé).
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Dossier interne de git (objets, configuration) : pas du code. Le checkout de GitHub Actions peut y écrire son jeton d'accès temporaire."
+paths = ['''(^|/)\.git/''']
+
+[[allowlists]]
+description = "Dépendances installées (si le dossier existe) : code tiers, déjà analysé par OSV-Scanner et npm audit ; ses jeux de test contiennent des clés factices."
+paths = ['''(^|/)node_modules/''']
+
+[[allowlists]]
+description = "Verrou des dépendances : uniquement des versions et des empreintes d'intégrité (sha512) publiques, que la règle generic-api-key peut prendre pour des clés."
+paths = ['''(^|/)package-lock\.json$''']

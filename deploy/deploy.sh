@@ -1,7 +1,13 @@
 #!/bin/bash
 # ============================================================
-#  Nanei API — Script de déploiement production
+#  Nanei API — Déploiement MANUEL de secours (sans la chaîne GitHub)
 #  Usage : bash deploy/deploy.sh
+#
+#  Le déploiement normal passe par GitHub Actions (.github/workflows/deploy.yml) :
+#  image construite et testée par le CI, tirée depuis GHCR. Ce script sert
+#  seulement si GitHub / GHCR est indisponible : il met le serveur au dernier
+#  commit de main et CONSTRUIT l'image sur place (non testée par le CI !),
+#  avec le même filet (sauvegarde, migrations, vérification, retour arrière).
 #
 #  Prérequis :
 #   • Docker & Docker Compose installés
@@ -9,7 +15,7 @@
 #   • Répertoires /var/www/nanei-api existants
 # ============================================================
 
-set -e
+set -euo pipefail
 
 PROJECT_NAME="nanei-api"
 PROJECT_DIR="/var/www/nanei-api"
@@ -33,18 +39,24 @@ fi
 
 # ── Récupérer le nouveau code ───────────────────────────────────────────────
 echo "📥 Récupération du code depuis Git..."
-git fetch origin
-git reset --hard origin/main
+# Fichiers suivis modifiés localement : on refuse plutôt que de les écraser
+# (avant : git reset --hard, qui les effaçait sans prévenir).
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  git status --short --untracked-files=no
+  echo "❌ Des fichiers suivis ont été modifiés sur le serveur : les reporter dans le dépôt ou les annuler, puis relancer."
+  exit 1
+fi
+git fetch origin main
+git -c advice.detachedHead=false checkout --detach origin/main
+SHA="$(git rev-parse HEAD)"
 
 # ── Créer les répertoires nécessaires ───────────────────────────────────────
 echo "📁 Création des répertoires..."
 mkdir -p uploads logs
 
-# ── Build, sauvegarde, migrations, redémarrage, contrôle /health ────────────
-# Même procédure que le CI/CD (voir deploy/release.sh) : les migrations sont
-# exécutées AVANT de redémarrer le backend, et une erreur arrête le
-# déploiement (plus de `|| true` qui masquait les échecs).
-bash deploy/release.sh
+# ── Construction locale, sauvegarde, migrations, redémarrage, contrôle ─────
+# Même procédure que le CI/CD (voir deploy/release.sh), image construite ici.
+bash deploy/release.sh deployer local "$SHA"
 
 # ── Afficher les logs ──────────────────────────────────────────────────────
 echo ""

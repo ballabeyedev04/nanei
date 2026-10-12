@@ -29,7 +29,7 @@ const { envoyerPushNotification } = require('../services/notification.service');
 const Service = require('../services/admin/gestioncolis.service');
 const controleur = require('../controllers/admin/gestoncolis.controller');
 
-const attendre = () => new Promise((r) => setImmediate(r));
+const attendre = () => new Promise((r) => { setImmediate(r); });
 
 function colis(statut) {
   return { id: 'c-1', reference: 'COL-2026-ABC', expediteurId: 'e', recepteurId: 'r', statut, save: jest.fn(async () => {}) };

@@ -84,7 +84,7 @@ function appelsMobile(env) {
         const arg = argBrut.trim();
         const ligne = src.slice(0, m.index).split('\n').length;
         const ou = `${fichier}:${ligne}`;
-        let chemin = null;
+        let chemin;
         let e2;
         if ((e2 = /^Env\.(\w+)/.exec(arg))) {
           chemin = env.get(e2[1]);

@@ -6,7 +6,7 @@ module.exports = ({
   date_execution,
   avance,
   lieu_execution,
-  moyen_paiement,
+
   dateGeneration,
   items = []
 }) => {

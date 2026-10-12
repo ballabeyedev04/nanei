@@ -1,7 +1,7 @@
 const multer = require('multer');
 const logger = require('../config/logger');
 
-module.exports = function errorHandler(err, req, res, next) {
+module.exports = function errorHandler(err, req, res, _next) {
   // Erreurs d'upload (multer) : ce sont des erreurs du client, pas du serveur.
   if (err instanceof multer.MulterError) {
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;

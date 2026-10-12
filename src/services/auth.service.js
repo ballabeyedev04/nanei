@@ -175,7 +175,11 @@ class AuthService {
         compteFantome.role = role;
         compteFantome.statut = 'actif';
         compteFantome.compteAuto = false;
-        compteFantome.passwordChangedAt = new Date();
+        // Reculé d'1 s, comme revoquerSessions : le jeton de la connexion qui
+        // suit l'inscription a un iat arrondi à la seconde ; avec new Date(),
+        // une connexion dans la même seconde donnait un jeton aussitôt refusé
+        // (401 « Session expirée… ») — vu par le test d'intégration.
+        compteFantome.passwordChangedAt = new Date(Date.now() - 1000);
         await compteFantome.save({ transaction: t });
 
         await t.commit();
@@ -372,7 +376,7 @@ class AuthService {
       // le client ne doit voir qu'un message générique, l'erreur réelle
       // reste dans les logs pour le diagnostic.
       logger.error('Erreur oublierPassword', { error: error.message, stack: error.stack });
-      throw new Error("Impossible d'envoyer l'email pour le moment. Veuillez réessayer plus tard.");
+      throw new Error("Impossible d'envoyer l'email pour le moment. Veuillez réessayer plus tard.", { cause: error });
     }
   }
 

@@ -49,3 +49,14 @@ coverage/
 
 # Sequelize
 *.sqlite
+
+# Clé de compte de service Firebase (secret) : en production, passer par
+# FIREBASE_SERVICE_ACCOUNT_JSON dans .env ; ce fichier local ne doit jamais
+# être versionné ni embarqué dans l'image.
+src/config/firebase-service-account.json
+
+# Base PostgreSQL jetable des tests d'intégration locaux (npm run test:integration:local)
+.tmp-pg/
+
+# État des déploiements sur le serveur (deploy/release.sh)
+.deploy/

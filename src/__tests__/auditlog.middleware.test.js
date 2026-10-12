@@ -30,7 +30,7 @@ function executer({ statusCode = 200, method = 'POST', body = {}, query = {}, pa
   return { next };
 }
 
-const attendre = () => new Promise((r) => setImmediate(r));
+const attendre = () => new Promise((r) => { setImmediate(r); });
 
 describe('masquerChampsSensibles', () => {
   it('masque mots de passe, jetons, OTP, secrets — à toute profondeur et dans les tableaux', () => {

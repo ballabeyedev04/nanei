@@ -4,10 +4,11 @@ const app = require('./app');
 const logger = require('./config/logger');
 
 // Modèles
-const User = require('./models/utilisateur.model');
-const Colis = require('./models/colis.model');
-const Notification = require('./models/notification.model');
-const MessageClient = require('./models/messageClient.model');
+// Chargés pour leur effet : enregistrer les modèles avant sequelize.sync().
+require('./models/utilisateur.model');
+require('./models/colis.model');
+require('./models/notification.model');
+require('./models/messageClient.model');
 const seedAdmin = require("./seed/seedAdmin");
 
 const isProd = process.env.NODE_ENV === 'production';

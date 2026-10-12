@@ -121,14 +121,14 @@ class AdminAuthService {
       // entre le chemin "compte éligible" (plus lent) et les autres.
       const elapsed = Date.now() - startedAt;
       if (elapsed < MIN_RESPONSE_MS) {
-        await new Promise((r) => setTimeout(r, MIN_RESPONSE_MS - elapsed));
+        await new Promise((r) => { setTimeout(r, MIN_RESPONSE_MS - elapsed); });
       }
 
       return GENERIC_OK;
     } catch (error) {
       const elapsed = Date.now() - startedAt;
       if (elapsed < MIN_RESPONSE_MS) {
-        await new Promise((r) => setTimeout(r, MIN_RESPONSE_MS - elapsed));
+        await new Promise((r) => { setTimeout(r, MIN_RESPONSE_MS - elapsed); });
       }
       throw error;
     }
@@ -145,82 +145,78 @@ class AdminAuthService {
    *   - Le nouveau mot de passe doit respecter la politique de sécurité
    */
   static async resetPassword(token, nouveauMotDePasse) {
+    // 1. Vérifier la signature JWT
+    let decoded;
     try {
-      // 1. Vérifier la signature JWT
-      let decoded;
-      try {
-        decoded = jwt.verify(token, jwtConfig.resetSecret);
-      } catch (jwtError) {
-        return {
-          success: false,
-          message: 'Lien de réinitialisation invalide ou expiré. Veuillez faire une nouvelle demande.'
-        };
-      }
-
-      // 2. Vérifier le champ purpose
-      if (decoded.purpose !== 'admin-password-reset') {
-        return {
-          success: false,
-          message: 'Token non autorisé pour cette opération.'
-        };
-      }
-
-      // 3. Récupérer l'utilisateur depuis la base
-      const utilisateur = await Utilisateur.findByPk(decoded.id);
-
-      if (!utilisateur) {
-        return { success: false, message: 'Compte introuvable.' };
-      }
-
-      // 4. Vérifier rôle Admin
-      if (utilisateur.role !== 'Admin') {
-        return { success: false, message: 'Opération non autorisée pour ce type de compte.' };
-      }
-
-      // 5. Vérifier que le compte est actif
-      if (utilisateur.statut !== 'actif') {
-        return { success: false, message: 'Votre compte est désactivé. Contactez le support.' };
-      }
-
-      // 6. Double vérification côté DB — le hash du token stocké doit
-      // correspondre à celui transporté dans le JWT, ET ne pas être expiré.
-      const incomingHash = decoded.rawToken ? hashToken(decoded.rawToken) : null;
-      if (
-        !incomingHash ||
-        utilisateur.resetPasswordToken !== incomingHash ||
-        !utilisateur.resetPasswordExpires ||
-        new Date() > utilisateur.resetPasswordExpires
-      ) {
-        return {
-          success: false,
-          message: 'Lien de réinitialisation invalide ou expiré. Veuillez faire une nouvelle demande.'
-        };
-      }
-
-      // 7. Politique de mot de passe
-      const policyError = AdminAuthService._validatePasswordPolicy(nouveauMotDePasse);
-      if (policyError) {
-        return { success: false, message: policyError };
-      }
-
-      // 8. Hacher et sauvegarder + invalider toute session déjà émise
-      const hashedPassword = await bcrypt.hash(nouveauMotDePasse, bcryptConfig.saltRounds);
-      utilisateur.mot_de_passe = hashedPassword;
-      utilisateur.resetPasswordToken = null;
-      utilisateur.resetPasswordExpires = null;
-      // passwordChangedAt + révocation de tous les refresh tokens : les
-      // sessions ouvertes avant la réinitialisation ne peuvent plus être
-      // renouvelées (avant, seul le jeton d'accès était invalidé).
-      await AuthService.revoquerSessions(utilisateur);
-      await utilisateur.save();
-
+      decoded = jwt.verify(token, jwtConfig.resetSecret);
+    } catch (jwtError) {
       return {
-        success: true,
-        message: 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.'
+        success: false,
+        message: 'Lien de réinitialisation invalide ou expiré. Veuillez faire une nouvelle demande.'
       };
-    } catch (error) {
-      throw error;
     }
+
+    // 2. Vérifier le champ purpose
+    if (decoded.purpose !== 'admin-password-reset') {
+      return {
+        success: false,
+        message: 'Token non autorisé pour cette opération.'
+      };
+    }
+
+    // 3. Récupérer l'utilisateur depuis la base
+    const utilisateur = await Utilisateur.findByPk(decoded.id);
+
+    if (!utilisateur) {
+      return { success: false, message: 'Compte introuvable.' };
+    }
+
+    // 4. Vérifier rôle Admin
+    if (utilisateur.role !== 'Admin') {
+      return { success: false, message: 'Opération non autorisée pour ce type de compte.' };
+    }
+
+    // 5. Vérifier que le compte est actif
+    if (utilisateur.statut !== 'actif') {
+      return { success: false, message: 'Votre compte est désactivé. Contactez le support.' };
+    }
+
+    // 6. Double vérification côté DB — le hash du token stocké doit
+    // correspondre à celui transporté dans le JWT, ET ne pas être expiré.
+    const incomingHash = decoded.rawToken ? hashToken(decoded.rawToken) : null;
+    if (
+      !incomingHash ||
+      utilisateur.resetPasswordToken !== incomingHash ||
+      !utilisateur.resetPasswordExpires ||
+      new Date() > utilisateur.resetPasswordExpires
+    ) {
+      return {
+        success: false,
+        message: 'Lien de réinitialisation invalide ou expiré. Veuillez faire une nouvelle demande.'
+      };
+    }
+
+    // 7. Politique de mot de passe
+    const policyError = AdminAuthService._validatePasswordPolicy(nouveauMotDePasse);
+    if (policyError) {
+      return { success: false, message: policyError };
+    }
+
+    // 8. Hacher et sauvegarder + invalider toute session déjà émise
+    const hashedPassword = await bcrypt.hash(nouveauMotDePasse, bcryptConfig.saltRounds);
+    utilisateur.mot_de_passe = hashedPassword;
+    utilisateur.resetPasswordToken = null;
+    utilisateur.resetPasswordExpires = null;
+    // passwordChangedAt + révocation de tous les refresh tokens : les
+    // sessions ouvertes avant la réinitialisation ne peuvent plus être
+    // renouvelées (avant, seul le jeton d'accès était invalidé).
+    await AuthService.revoquerSessions(utilisateur);
+    await utilisateur.save();
+
+    return {
+      success: true,
+      message: 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.'
+    };
   }
 
   /**

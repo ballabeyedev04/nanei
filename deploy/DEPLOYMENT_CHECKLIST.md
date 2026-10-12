@@ -7,7 +7,7 @@ Utilise cette checklist pour vérifier que tout est prêt avant de lancer en pro
 - [ ] **Fichier .env** : existe et contient tous les secrets (DB_PASSWORD, JWT_SECRET, etc.)
 - [ ] **Fichier .env.example** : mis à jour avec les nouvelles variables (sans secrets)
 - [ ] **.env dans .gitignore** : vérifier que .env n'est jamais commité
-- [ ] **Secrets GitHub** : VPS_HOST, VPS_USER, VPS_SSH_KEY configurés
+- [ ] **Secrets GitHub** : VPS_HOST, VPS_USER, VPS_SSH_KEY (+ VPS_KNOWN_HOSTS recommandé, VPS_PORT si ≠ 22), environnement `production` avec relecteurs requis — voir deploy/README.md, A.4
 - [ ] **JWT_SECRET** : généré aléatoirement (>64 caractères)
 - [ ] **JWT_REFRESH_SECRET** : différent de JWT_SECRET
 - [ ] **DB_PASSWORD** : mot de passe fort (>20 caractères, caractères spéciaux)

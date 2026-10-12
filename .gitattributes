@@ -1,0 +1,5 @@
+# Scripts exécutés sous Linux (CI, serveur) : toujours en fins de ligne Unix.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf

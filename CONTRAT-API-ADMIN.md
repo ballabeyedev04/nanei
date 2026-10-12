@@ -45,6 +45,12 @@
 - Côté admin, `VITE_API_URL` **contient déjà** `/nanei` (`.env` : `https://api.app-nanei.com/nanei`). Valeur par défaut si absente : `/nanei` (`src/api/axios.ts:5`). Les chemins de l’admin commencent donc par `/auth`, `/account`, `/admin`.
 - Les en-têtes autorisés par CORS sont `Content-Type` et `Authorization` uniquement. Origines : variable `CORS_ORIGIN` (liste séparée par des virgules).
 
+### Santé et version du contrat (garde de déploiement)
+
+- `GET /health` (hors préfixe `/nanei`, publique) → `200 { "status": "OK", "db": "ok", "version": "<sha du commit | dev>", "api": <entier> }`, ou `503 { "status": "KO", "db": "erreur" }` si la base est injoignable. `api` = version du contrat d’API (`src/config/version.js`, `API_VERSION`) : incrémentée quand une modification du back casse le contrat de l’admin ou du mobile.
+- **Garde de déploiement de l’admin** : avant de se déployer, l’admin lit `api` sur `https://<domaine-api>/health` et **refuse** de partir si `api` est inférieur à sa constante minimale (back pas encore à jour) ou si la sonde ne répond pas `200`.
+- Règle côté back : `API_VERSION` est incrémentée dans le même commit qu’un changement qui casse ou étend de façon nécessaire ce contrat (route retirée / renommée, champ retiré / renommé, champ devenu obligatoire, nouvelle route requise par l’admin) ; jamais décrémentée. Valeur actuelle : **2**.
+
 ### Jeton
 
 - Chaque appel protégé envoie `Authorization: Bearer <token>` (ajouté par l’intercepteur de `src/api/axios.ts`).

@@ -69,7 +69,7 @@ const seedPrices = async () => {
     console.log('Creating shipping prices...');
     for (const priceData of shippingPricesData) {
       const country = createdCountries.find(c => c.code === priceData.countryCode);
-      const [price] = await ShippingPrice.findOrCreate({
+      await ShippingPrice.findOrCreate({
         where: {
           countryId: country.id,
           type: priceData.type,
@@ -104,7 +104,7 @@ const seedPrices = async () => {
     console.log('Creating service prices...');
     for (const priceData of servicePricesData) {
       const country = createdCountries.find(c => c.code === priceData.countryCode);
-      const [price] = await ServicePrice.findOrCreate({
+      await ServicePrice.findOrCreate({
         where: {
           serviceType: priceData.serviceType,
           countryId: country.id,

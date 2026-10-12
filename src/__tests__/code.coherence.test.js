@@ -63,7 +63,7 @@ describe('identifiants', () => {
   it('aucun identifiant utilisé sans être déclaré ou importé (équivalent ESLint no-undef)', () => {
     const fautes = [];
     for (const fichier of FICHIERS) {
-      const src = fs.readFileSync(fichier, 'utf8').replace(/^﻿/, '');
+      const src = fs.readFileSync(fichier, 'utf8').replace(/^\uFEFF/, '');
       const ast = parse(src, { sourceType: 'script', errorRecovery: false, allowReturnOutsideFunction: true });
       traverse(ast, {
         ReferencedIdentifier(p) {

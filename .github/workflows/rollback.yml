@@ -1,0 +1,216 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Nanei — retour arrière MANUEL du back (remise en service d'une image)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#   1. Contrôles (version, image sur GHCR) → 2. ✋ Approbation → remise en service → 3. Bilan
+#
+#   Lancer : Actions > « Back — retour arrière » > Run workflow, version =
+#            sha (complet ou abrégé) ou tag « back-v… » d'une version déjà
+#            déployée (liste : onglet Releases).
+#
+#   Remet en service une image DÉJÀ construite et testée (ghcr.io/…/nanei-api:<sha>)
+#   par le même deploy/release.sh (mode « retour ») : sans sauvegarde ni
+#   migration, avec la même vérification /health et le même filet (si la
+#   version demandée ne répond pas, celle en service est remise).
+#   La BASE n'est PAS modifiée : les migrations appliquées depuis restent en
+#   place (elles sont rétrocompatibles, voir deploy/README.md).
+#   Le retour arrière AUTOMATIQUE pendant un déploiement est fait par
+#   deploy.yml ; ce workflow sert à revenir plus tard sur une version.
+
+name: Back — retour arrière
+run-name: ↩️ Retour arrière vers ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à remettre en service : sha (complet ou abrégé) ou tag back-v…"
+        type: string
+        required: true
+      motif:
+        description: "Motif (affiché dans le résumé)"
+        type: string
+        required: false
+
+# Même groupe que deploy.yml : jamais en même temps qu'un déploiement.
+concurrency:
+  group: back-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  controles:
+    name: 1 · Contrôles
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: read # vérifier que l'image existe sur GHCR
+    outputs:
+      sha: ${{ steps.version.outputs.sha }}
+      image: ${{ steps.version.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # historique et tags, pour résoudre la version demandée
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+
+      - name: Version demandée
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+          MOTIF: ${{ inputs.motif }}
+        run: |
+          {
+            echo "## ↩️ Retour arrière du back"
+            echo ""
+            echo "| Contrôle | Résultat | |"
+            echo "|---|---|:---:|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          VERSION="$(printf '%s' "$VERSION" | tr -d '[:space:]')"
+          if ! [[ "$VERSION" =~ ^[A-Za-z0-9._-]{4,80}$ ]]; then
+            echo "| Version | « $VERSION » invalide | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Version invalide : donnez un sha (7 caractères ou plus) ou un tag back-v…"
+            exit 1
+          fi
+          SHA="$(git rev-parse --verify --quiet "${VERSION}^{commit}" || true)"
+          if [ -z "$SHA" ]; then
+            echo "| Version | « $VERSION » introuvable dans le dépôt | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::« $VERSION » ne correspond à aucun commit ni tag."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "| Version | \`${SHA::7}\` n'est pas sur main | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Seule une version présente sur main peut être remise en service."
+            exit 1
+          fi
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/nanei-api:${SHA}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "| Version | \`$VERSION\` → \`${SHA::7}\` — $(git log -1 --format='%s (%cs)' "$SHA" | sed 's/|/\\|/g') | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Motif | ${MOTIF:-—} | ℹ️ |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Migrations ajoutées APRÈS cette version : elles restent appliquées
+          # (la base n'est pas touchée), l'ancien code doit les tolérer.
+          APRES="$(git diff --name-only --diff-filter=A "$SHA" origin/main -- src/migrations/ | xargs -r -n1 basename | paste -sd, - || true)"
+          if [ -n "$APRES" ]; then
+            echo "| Migrations postérieures (restent appliquées) | $APRES | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Migrations postérieures à cette version, qui restent appliquées : $APRES"
+          else
+            echo "| Migrations postérieures | aucune | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: L'image existe sur GHCR
+        env:
+          IMAGE: ${{ steps.version.outputs.image }}
+        run: |
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "| Image | \`$IMAGE\` présente sur GHCR | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Image | \`$IMAGE\` absente de GHCR | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Aucune image pour ce commit sur GHCR : seules les versions construites par la chaîne deploy.yml peuvent être remises en service (le serveur garde aussi les dernières images localement)."
+            exit 1
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  retour:
+    name: 2 · Approbation & remise en service
+    needs: controles
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 30
+    # ✋ Même environnement que les déploiements : approbation requise.
+    environment:
+      name: production
+      url: ${{ vars.API_URL }}
+    permissions:
+      contents: read
+      packages: read # le serveur tire l'image avec ce jeton
+    env:
+      IMAGE: ${{ needs.controles.outputs.image }}
+      SHA: ${{ needs.controles.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # le jeton GitHub ne reste pas sur la machine
+
+      - name: Accès SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: bash scripts/ci/preparer-ssh.sh
+
+      - name: Remise en service sur le serveur
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/ssh-distant.sh retour "$IMAGE" "$SHA" retour.log
+
+      - name: Résumé
+        if: always()
+        run: |
+          r() { sed -n "s/^RESULTAT $1=//p" retour.log 2>/dev/null | tail -1; }
+          ISSUE="$(r issue)"
+          {
+            echo "### 🛫 Remise en service"
+            echo ""
+            case "$ISSUE" in
+              succes)
+                echo "✅ **\`${SHA::7}\` de nouveau en service** et vérifiée (db ok, bonne version)."
+                echo ""
+                echo "- Version remplacée : \`$(r precedente_sha)\` (\`$(r precedente_image)\`)"
+                echo "- /health : \`$(r sante)\`"
+                ;;
+              echec-retour-arriere-ok)
+                echo "❌ **La version demandée ne répond pas correctement** (\`$(r sante_nouvelle)\`) : la version qui était en service (\`$(r precedente_sha)\`) a été remise et vérifiée."
+                ;;
+              echec-retour-arriere-ko|echec-sans-retour)
+                echo "🚨 **BACKEND HORS SERVICE** : intervention manuelle immédiate (deploy/README.md, « Dépannage »)."
+                ;;
+              *)
+                echo "❌ **Rien n'a été modifié en service** (${ISSUE:-arrêt avant la remise en service}) — voir le journal."
+                ;;
+            esac
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$HOME/.ssh/nanei_vps"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: journal-retour-arriere
+          path: retour.log
+          retention-days: 90
+          if-no-files-found: ignore
+
+  # ─────────────────────────────────────────────────────────────────────────
+  bilan:
+    name: 3 · Bilan
+    if: always()
+    needs: [controles, retour]
+    runs-on: ubuntu-24.04 # figé : un changement de système se décide, il ne se subit pas
+    timeout-minutes: 5
+    steps:
+      - name: Bilan
+        run: |
+          icone() { case "$1" in success) echo "✅";; failure) echo "❌";; cancelled) echo "⏹️";; skipped) echo "⏭️";; *) echo "❔";; esac; }
+          {
+            echo "## 📋 Bilan du retour arrière"
+            echo ""
+            echo "| Étape | Résultat |"
+            echo "|---|:---:|"
+            echo "| 1 · Contrôles | $(icone '${{ needs.controles.result }}') |"
+            echo "| 2 · Approbation & remise en service | $(icone '${{ needs.retour.result }}') |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -43,7 +43,7 @@
 - Toutes les routes sont préfixées par **`/nanei`** : `https://<domaine-api>/nanei/...`.
 - Côté mobile, `Env.baseUrl` (`API_BASE_URL`) **contient déjà** `/nanei` ; les chemins de l’application commencent donc par `/auth`, `/client`, etc.
 - Compatibilité : un préfixe doublé `/nanei/nanei/...` est réécrit en `/nanei/...` par le back (rustine temporaire, ne pas s’en servir).
-- Santé : `GET /health` → `{ "status": "OK" }` (hors préfixe `/nanei`).
+- Santé : `GET /health` (hors préfixe `/nanei`, publique) → `200 { "status": "OK", "db": "ok", "version": "<sha du commit | dev>", "api": <entier> }`, ou `503 { "status": "KO", "db": "erreur" }` si la base est injoignable. `api` = version du contrat d’API (`src/config/version.js`, `API_VERSION`) : incrémentée quand une modification du back casse le contrat de l’admin ou du mobile.
 
 ### Forme des réponses
 
@@ -996,7 +996,7 @@ Mêmes champs, tous facultatifs (un champ présent remplace la valeur). **Répon
 
 ## 14. Divers (santé, fichiers)
 
-- `GET /health` → `200 { "status": "OK" }`.
+- `GET /health` (hors préfixe `/nanei`, publique) → `200 { "status": "OK", "db": "ok", "version": "<sha du commit | dev>", "api": <entier> }`, ou `503 { "status": "KO", "db": "erreur" }` si la base est injoignable. `api` = version du contrat d’API (`src/config/version.js`, `API_VERSION`) : incrémentée quand une modification du back casse le contrat de l’admin ou du mobile.
 - `GET /uploads/<chemin>` : fichiers statiques locaux (hérités). Les nouveaux fichiers (photos de réclamation, preuves, profil) sont sur **Cloudflare R2** : utiliser directement l’URL complète renvoyée.
 
 ---

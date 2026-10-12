@@ -10,6 +10,9 @@ function getFirebase() {
     if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
       serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     } else {
+      // Fichier local facultatif (jamais versionné, voir .gitignore) : son
+      // absence est prévue et gérée par le catch ci-dessous.
+      // eslint-disable-next-line n/no-missing-require, n/no-unpublished-require -- fichier facultatif, absent du dépôt par conception
       serviceAccount = require('./firebase-service-account.json');
     }
     firebaseApp = admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });

@@ -99,6 +99,7 @@ describe('motifRecherche', () => {
     expect(motifRecherche('50%')).toBe('%50\\%%');
     expect(motifRecherche('a_b')).toBe('%a\\_b%');
     expect(motifRecherche('c:\\x')).toBe('%c:\\\\x%');
+    // eslint-disable-next-line no-template-curly-in-string -- on vérifie justement qu'un gabarit non interpolé « ${c} » ne fuit pas
     expect(motifRecherche('50%')).not.toContain('${c}');
   });
 });

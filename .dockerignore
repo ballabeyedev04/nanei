@@ -63,3 +63,13 @@ deploy/
 
 # Sequelize
 *.sqlite
+
+# Secret Firebase local (voir .gitignore)
+src/config/firebase-service-account.json
+.tmp-pg/
+
+# Scripts de vérification (CI / poste local), inutiles dans l'image
+scripts/
+eslint.config.js
+.gitleaks.toml
+.github/
