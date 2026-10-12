@@ -48,5 +48,26 @@ fi
 } > "$HOME/.ssh/config"
 chmod 600 "$HOME/.ssh/config"
 
-ssh nanei-vps true || { echo "::error::Connexion SSH refusée par $VPS_USER@$VPS_HOST:$PORT (clé VPS_SSH_KEY ?)"; exit 1; }
+diagnostiquer_ssh() {
+  echo "::group::Diagnostic SSH (données publiques)"
+  if [ ! -s "$HOME/.ssh/known_hosts" ]; then
+    echo "known_hosts vide : le secret VPS_KNOWN_HOSTS ne contient aucune ligne."
+  else
+    echo "Lignes lues dans VPS_KNOWN_HOSTS (nom ou adresse → type de clé) :"
+    awk 'NF>=3 && $2 ~ /^(ssh-|ecdsa-|sk-)/ { print "  " $1 " → " $2 }' "$HOME/.ssh/known_hosts"
+    if ! awk 'NF>=3 && $2 ~ /^(ssh-|ecdsa-|sk-)/' "$HOME/.ssh/known_hosts" | grep -q .; then
+      echo "Aucune ligne au format known_hosts (« hôte type clé ») : le secret contient sans doute les EMPREINTES (SHA256:…) au lieu du contenu du fichier produit par ssh-keyscan."
+    fi
+    if ! awk '{ print $1 }' "$HOME/.ssh/known_hosts" | tr ',' '\n' | grep -qxF "$VPS_HOST"; then
+      echo "Aucune ligne pour le nom EXACT de VPS_HOST (« $VPS_HOST ») : régénérer avec « ssh-keyscan $VPS_HOST » (OpenSSH compare le nom tel qu'il est écrit : une IP ne vaut pas pour un domaine)."
+    fi
+  fi
+  echo "::endgroup::"
+}
+
+ssh nanei-vps true || {
+  diagnostiquer_ssh
+  echo "::error::Connexion SSH refusée par $VPS_USER@$VPS_HOST:$PORT (empreinte du serveur absente de VPS_KNOWN_HOSTS, ou clé VPS_SSH_KEY refusée : voir le diagnostic ci-dessus)"
+  exit 1
+}
 echo "Connexion SSH vérifiée."
