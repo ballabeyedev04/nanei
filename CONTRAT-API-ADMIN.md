@@ -1,5 +1,7 @@
 # Contrat d’API — Back-office admin Nanei / Franco Mali Ship
 
+> **Mis à jour le 2026-10-12 : relecture complète** route par route contre le code (`app.js`, `routes/**`, middlewares, contrôleurs, services) et contre chaque appel de `admin-nanei/src/api/*.ts`. 78 routes montées dans le périmètre, 78 documentées (aucune manquante) ; sections remises à jour pour la pagination, les filtres `q` / `statut`, les codes 404 / 409 / 500 (`utils/statutHttp.js`), les contrôles numériques des tarifs, les transitions de statut colis et le filtre global des erreurs. Détail en Annexe B.8.
+>
 > Rédigé le 2026-10-11 **à partir du code** du back (`nanei/src` : `app.js`, routes, middlewares, contrôleurs, services, modèles Sequelize) et de l’admin React (`admin-nanei/src` : `api/*.ts`, écrans `features/*`, `types/index.ts`). Mis à jour le même jour après la correction des 12 points prioritaires (Annexe B.0), puis après une **deuxième vérification complète** de chaque appel de l’admin (Annexe B.5, 27 problèmes corrigés), puis le 2026-10-12 après la correction des derniers points et l’ajout de la **pagination** (Annexe B.6). Il ne s’agit **pas** d’exemples capturés sur une API réelle : les formes de réponse sont déduites du code. Les points marqués **⚠️ À vérifier** n’ont pas pu être confirmés par lecture seule.
 >
 > **Périmètre :** toutes les routes `/nanei/admin/*`, plus les routes `/nanei/auth/*` et `/nanei/account/*` utilisées par l’admin pour la connexion et le profil. L’application mobile a son propre contrat : `CONTRAT-API-MOBILE.md`.
@@ -17,7 +19,7 @@
 - [0. Conventions communes](#0-conventions-communes)
 - [1. Authentification admin](#1-authentification-admin) — 8 routes
 - [2. Administrateurs](#2-administrateurs) — 6 routes
-- [3. Clients (utilisateurs)](#3-clients-utilisateurs) — 6 routes
+- [3. Clients (utilisateurs)](#3-clients-utilisateurs) — 5 routes
 - [4. Journal d’audit](#4-journal-daudit) — 1 route
 - [5. Messages du support](#5-messages-du-support) — 3 routes
 - [6. Colis](#6-colis) — 12 routes
@@ -32,6 +34,9 @@
 - [15. Taux de change](#15-taux-de-change) — 3 routes
 - [16. Paiements](#16-paiements) — 3 routes
 - [17. Rapports et tableau de bord](#17-rapports-et-tableau-de-bord) — 3 routes
+
+**Total : 78 routes** (72 sous `/nanei/admin`, 3 sous `/nanei/auth`, 3 sous `/nanei/account`).
+
 - [Annexe A — Énumérations métier](#annexe-a--énumérations-métier)
 - [Annexe B — Écarts constatés et points de vigilance](#annexe-b--écarts-constatés-et-points-de-vigilance)
 
@@ -105,7 +110,7 @@ Pas d’enveloppe commune. Dans ce périmètre :
 | `{ success, data }` | admins (nombre), clients (recherche), messages (liste) |
 | `{ success, total, data }` | clients (liste) |
 | `{ success, total }` | clients (nombre), messages (stats) |
-| `{ success, total, page, pages, logs }` | journal d’audit |
+| `{ success, total, page, pages, pagination, logs }` | journal d’audit (`pagination` toujours présent) |
 | **tableau nu** `[ … ]` | `GET /admin/rechercher-admin` |
 | `{ success, message }` | mots de passe oubliés admin |
 
@@ -122,8 +127,12 @@ Pas d’enveloppe commune. Dans ce périmètre :
 | 403 | Rôle ≠ `Admin` | `{ "success": false, "message": "Accès refusé" }` |
 | 404 | Utilisateur du jeton supprimé | `{ "message": "Utilisateur introuvable" }` |
 | 429 | Débit dépassé | voir tableau ci-dessus |
-| 500 | Erreur interne interceptée | `{ "success": false, "message": "Erreur serveur…", "error": "<détail technique>" }` |
-| 500 | Erreur non interceptée (`errorHandler`) | `{ "success": false, "message": "Erreur interne du serveur", "error": "Erreur interne du serveur" }` |
+| 500 | Erreur interne interceptée | `{ "success": false, "message": "Erreur serveur…" }` (le champ `error` / `erreur` est **retiré** de toute réponse ≥ 500) |
+| 500 | Erreur non interceptée (`errorHandler`) | `{ "success": false, "message": "Erreur interne du serveur" }` |
+| 400 / 413 | Fichier refusé par multer (`errorHandler`) | `{ "success": false, "message": "Fichier trop volumineux" \| "Trop de fichiers ou champ de fichier inattendu" \| "Fichier invalide" \| "Type de fichier non autorisé", "error": "<même texte>" }` |
+
+> **Filtre global des erreurs** (`middlewares/reponsesErreur.middleware.js`, monté avant toutes les routes) : sur toute réponse JSON ≥ 400, `error` / `erreur` sont supprimés si le code est ≥ 500 ou si leur texte est technique ; un `message` technique (SQL, pile, `TypeError`…) devient « Erreur serveur » (≥ 500) ou « Requête invalide » (4xx). Les messages listés route par route sont ceux du code, avant ce filtre.
+> **Codes « non trouvé » / erreur base** (`utils/statutHttp.js`, `statutEchec`) : dans les contrôleurs qui l’utilisent, un message « … non trouvé(e) » / « introuvable » donne **404**, un résultat de service portant un champ `error` (exception base attrapée) donne **500**, le reste le code par défaut de la route (400).
 
 > Les routes `/nanei/admin/*` de ce périmètre n’ont **aucune validation Joi** : les contrôles sont faits à la main dans les contrôleurs et services.
 > Pas de code d’erreur stable : brancher la logique sur le **code HTTP**.
@@ -151,13 +160,15 @@ Pas d’enveloppe commune. Dans ce périmètre :
 | Méthode | Chemin | Accès |
 |---|---|---|
 | POST | `/nanei/auth/login` | public (5 req / 15 min / IP) |
-| POST | `/nanei/auth/refresh` | public (5 req / 15 min / IP) |
+| POST | `/nanei/auth/refresh` | public (`refreshRateLimit` : 30 req / 15 min / IP) |
 | POST | `/nanei/auth/logout` | public |
 | GET | `/nanei/account/me` | jeton (tout rôle) |
-| PUT | `/nanei/account/modifier-profil` | jeton (tout rôle) |
-| PUT | `/nanei/account/change-password` | jeton (tout rôle) |
-| POST | `/nanei/admin/forgot-password` | public (5 req / 15 min / IP) |
-| POST | `/nanei/admin/reset-password` | public (5 req / 15 min / IP) |
+| PUT | `/nanei/account/modifier-profil` | jeton (tout rôle) + `checkActiveUser` + `mutationRateLimit` + upload `photoProfil` + Joi |
+| PUT | `/nanei/account/change-password` | jeton (tout rôle) + `checkActiveUser` + `mutationRateLimit` + Joi |
+| POST | `/nanei/admin/forgot-password` | public (`motDePasseRateLimit` : 5 req / 15 min / IP ; + `adminRateLimit`) |
+| POST | `/nanei/admin/reset-password` | public (`motDePasseRateLimit` : 5 req / 15 min / IP ; + `adminRateLimit`) |
+
+> Routes montées sous `/nanei/auth` et `/nanei/account` mais **non appelées par l’admin** (hors périmètre, voir `CONTRAT-API-MOBILE.md`) : `POST /nanei/auth/register`, `POST /nanei/auth/oublier-password`, `POST /nanei/auth/reset-password`, `POST /nanei/account/fcm-token`, `DELETE /nanei/account`.
 
 #### `POST /nanei/auth/login`
 
@@ -174,7 +185,7 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 > L’admin refuse lui-même un `utilisateur.role` ≠ `Admin` (message « Accès réservé aux administrateurs » côté écran).
 
-**Admin :** `authApi.login({ identifiant: email, mot_de_passe })` (`src/api/auth.ts:5`), appelée par `LoginPage.tsx:24`. Lit `token` et `utilisateur`.
+**Admin :** `authApi.login({ identifiant: email, mot_de_passe })` (`src/api/auth.ts:5`), appelée par `LoginPage.tsx:25`. Lit `token`, `refreshToken` et `utilisateur`.
 
 ---
 
@@ -188,7 +199,7 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 **Contrôles :** refresh token connu, non révoqué, non expiré, signature valide ; **compte existant et actif** ; refresh token émis **après** le dernier changement de mot de passe (`passwordChangedAt`). Sinon 401 et le refresh token est révoqué.
 
-**Erreurs :** 400 « Données invalides » · 401 « Refresh token invalide ou révoqué » · 401 « Refresh token expiré » · 401 « Refresh token invalide » · 401 « Session expirée, veuillez vous reconnecter » · 429 (`refreshRateLimit`, 30 / 15 min / IP) · 500 « Erreur serveur ».
+**Erreurs :** 400 « Données invalides » (Joi, `refreshToken` absent) · 401 « Refresh token invalide ou révoqué » · 401 « Refresh token expiré » · 401 « Refresh token invalide » · 401 « Session expirée, veuillez vous reconnecter » · 429 (`refreshRateLimit`, 30 / 15 min / IP) · 500 « Erreur serveur ».
 
 **Admin :** `renouvelerJeton()` (`src/api/axios.ts`), automatiquement sur un 401 (voir « Session côté admin »).
 
@@ -202,9 +213,9 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 **Réponse 200 :** `{ "message": "Déconnexion réussie" }`. Le refresh token envoyé est révoqué s’il est fourni.
 
-**Erreurs :** 500 « Erreur serveur ».
+**Erreurs :** 400 « Données invalides » (Joi, `refreshToken` non textuel) · 500 « Erreur serveur ».
 
-**Admin :** `authApi.logout('')` (`src/api/auth.ts:8`), appelée par `DashboardLayout.tsx:40` avec une **chaîne vide** : rien n’est révoqué.
+**Admin :** `authApi.logout(refreshToken)` (`src/api/auth.ts:8`), appelée par `DashboardLayout.tsx:116` avec le refresh token du store (appel sauté s’il est absent ; une erreur réseau n’empêche pas la déconnexion locale).
 
 ---
 
@@ -214,7 +225,7 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 **Erreurs :** 401 / 403 / 404 (voir conventions) · 500 « Erreur serveur ».
 
-**Admin :** `authApi.me()` (`src/api/auth.ts:11`), appelée par `useAuthGuard.ts:22`. Lit `utilisateur.role`.
+**Admin :** `authApi.me()` (`src/api/auth.ts:11`), appelée par `useAuthGuard.ts:23`. Lit `utilisateur.role`.
 
 ---
 
@@ -224,19 +235,22 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
-| `nom` | string | non | 2 à 50 car. |
-| `prenom` | string | non | 2 à 50 car. |
+| `nom` | string | non | 2 à 50 car. (après `trim`) |
+| `prenom` | string | non | 2 à 50 car. (après `trim`) |
 | `email` | string | non | e-mail valide, mis en minuscules ; unique |
 | `adresse` | string | non | max 200 car. ; `""` accepté |
-| `telephone` | string | non | `^\+?[0-9\s\-\.]{7,20}$` ; `""` accepté (ignoré) ; unique |
+| `telephone` | string | non | `^\+?[0-9\s\-.]{7,20}$` ; `""` accepté (voir ci-dessous) ; unique |
+| `photoProfil` | fichier | non | un seul fichier ; `Content-Type` `application/pdf`, `image/png`, `image/jpeg` ou `image/webp` ; 5 Mo max ; contenu vérifié par signature (PNG, JPEG, WEBP ou PDF) ; envoyé sur R2 (`nanei/profils`) |
 
-**Réponse 200 :** `{ "message": "Profil modifié avec succès", "utilisateur": { … } }`.
+Champs inconnus retirés par Joi (`stripUnknown`).
 
-**Erreurs :** 400 « Données invalides » · 400 « Cet email est déjà utilisé » · 400 « Ce numéro de téléphone est déjà utilisé » · 400 « Utilisateur non trouvé » · 429 · 500 « Erreur serveur lors de la modification du profil ».
+**Réponse 200 :** `{ "message": "Profil modifié avec succès", "utilisateur": { id, nom, prenom, email, adresse, telephone, role, statut, photoProfil } }`.
 
-> Un `telephone` vide ne vide pas le numéro : il est simplement ignoré.
+**Erreurs :** 400 « Données invalides » (+ `details`) · 400 « Cet email est déjà utilisé » · 400 « Ce numéro de téléphone est déjà utilisé » · 400 « Le numéro de téléphone est obligatoire » (`telephone: ""` sur un compte **client** qui en a un) · 400 « Utilisateur non trouvé » · 400 « Type de fichier non autorisé » / « Type de fichier non autorisé (contenu non reconnu comme image PNG, JPEG, WEBP ou PDF) » · 413 « Fichier trop volumineux » · 429 · 500 « Erreur serveur lors de la modification du profil ».
 
-**Admin :** `authApi.updateProfile({ nom, prenom, telephone, adresse })` (`src/api/auth.ts:14`), appelée par `ProfilePage.tsx:43`. Lit `utilisateur` (ou `user`).
+> `telephone: ""` sur un compte **Admin** **retire** le numéro (mis à `NULL`) ; sur un compte client, il est refusé (400 ci-dessus). Avant, il était ignoré avec un 200.
+
+**Admin :** `authApi.updateProfile({ nom, prenom, telephone, adresse })` (`src/api/auth.ts:14`), appelée par `ProfilePage.tsx:44`. Lit `utilisateur` (repli sur `user`, clé que le back ne renvoie jamais — voir Annexe B.8).
 
 ---
 
@@ -253,7 +267,7 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 **Erreurs :** 400 « Données invalides » (+ `details`) · 400 « Mot de passe actuel incorrect. » · 400 « Utilisateur non trouvé. » · 429 · 500 « Erreur serveur lors du changement de mot de passe ».
 
-**Admin :** `authApi.changePassword({ ancienMotDePasse, nouveauMotDePasse })` (`src/api/auth.ts`), qui envoie `{ oldPassword, newPassword }`. `ProfilePage` enregistre `token` et `refreshToken` (`setTokens`) et affiche le détail des erreurs de validation.
+**Admin :** `authApi.changePassword({ ancienMotDePasse, nouveauMotDePasse })` (`src/api/auth.ts:21`, appelée par `ProfilePage.tsx:71`), qui envoie `{ oldPassword, newPassword }`. `ProfilePage` enregistre `token` et `refreshToken` (`setTokens`) et affiche le détail des erreurs de validation.
 
 ---
 
@@ -271,7 +285,7 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 > Le lien envoyé est `${FRONTEND_URL}/nanei/admin/reset-password?token=<jwt>`, valable **10 minutes**. Temps de réponse minimum 400 ms (anti-énumération).
 
-**Admin :** `authApi.adminForgotPassword(email)` (`src/api/auth.ts`), appelée par `ForgotPasswordPage`. « E-mail envoyé » ne s’affiche que sur une réponse 200 ; un 429, une erreur serveur ou une panne réseau affiche un message d’erreur (avant : « envoyé » dans tous les cas).
+**Admin :** `authApi.adminForgotPassword(email)` (`src/api/auth.ts:28`), appelée par `ForgotPasswordPage.tsx:24`. « E-mail envoyé » ne s’affiche que sur une réponse 200 ; un 429, une erreur serveur ou une panne réseau affiche un message d’erreur (avant : « envoyé » dans tous les cas).
 
 ---
 
@@ -288,7 +302,7 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 **Erreurs (400, `{ success: false, message }`) :** « Token de réinitialisation manquant. » · « Le nouveau mot de passe est requis. » · « Lien de réinitialisation invalide ou expiré. Veuillez faire une nouvelle demande. » · « Token non autorisé pour cette opération. » · « Compte introuvable. » · « Opération non autorisée pour ce type de compte. » · « Votre compte est désactivé. Contactez le support. » · « Le mot de passe doit contenir au moins 8 caractères. » · « … au moins une lettre majuscule. » · « … au moins une lettre minuscule. » · « … au moins un chiffre. » · « … au moins un caractère spécial (!@#$%^&*). » — puis 429 · 500.
 
-**Admin :** `authApi.adminResetPassword({ token, mot_de_passe })` (`src/api/auth.ts:31`), appelée par `ResetPasswordPage.tsx:48`. Un 400 dont le message contient « expiré » ou « invalide » affiche l’écran « lien invalide ».
+**Admin :** `authApi.adminResetPassword({ token, mot_de_passe })` (`src/api/auth.ts:31`), appelée par `ResetPasswordPage.tsx:50`. Un 400 dont le message contient « expiré » ou « invalide » affiche l’écran « lien invalide ».
 
 ---
 
@@ -305,15 +319,15 @@ Pas d’enveloppe commune. Dans ce périmètre :
 
 #### `GET /nanei/admin/liste-admins`
 
-Pas de pagination ni de filtre. L’admin connecté est **exclu** de la liste.
+**Paramètres (query) :** pagination facultative `page`, `limit` (voir §0) ; `q` (facultatif) : « contient », insensible à la casse, sur nom, prénom, e-mail **ou** téléphone. L’admin connecté est **exclu** de la liste. Tri : `created_at` décroissant.
 
-**Réponse 200 :** `{ "success": true, "message": "Liste des admins récupérée avec succès", "data": [ { id, nom, prenom, email, adresse, telephone, role, statut, photoProfil, createdAt, updatedAt, deletedAt } ] }`. Liste vide → `message: "Aucun admin trouvé"`.
+**Réponse 200 :** `{ "success": true, "message": "Liste des admins récupérée avec succès", "data": [ { id, nom, prenom, email, adresse, telephone, role, statut, photoProfil, createdAt, updatedAt, deletedAt } ] }` (+ `pagination` si `page` / `limit`). Page vide → `message: "Aucun admin trouvé"`.
 
 **Erreurs :** 401 · 403 · 500 « Erreur serveur lors de la récupération des admins ». Une erreur base renvoie **500** `{ success: false, message: "Erreur lors de la récupération des admins" }` (le détail technique est retiré).
 
 > **Champs privés jamais renvoyés** (toutes routes, admin et client) : `mot_de_passe`, `resetPasswordToken`, `resetPasswordExpires`, `passwordChangedAt`, `otpCode`, `otpExpires`, `fcm_token`. Ils sont exclus des requêtes et retirés à la sérialisation JSON (`User.CHAMPS_PRIVES`, `utilisateur.model.js`).
 
-**Admin :** `adminsApi.list()` (`src/api/admins.ts:5`), appelée par `AdminsPage.tsx:69` et `AuditLogPage.tsx:32`. Lit `data` (repli sur `admins`).
+**Admin :** `adminsApi.list(params)` (`src/api/admins.ts:11`), appelée par `AdminsPage.tsx:77` (`page`, `limit`, `q`) et `AuditLogPage.tsx:37` (sans paramètre : liste complète pour le filtre). Lit `data` et `pagination`.
 
 ---
 
@@ -321,22 +335,26 @@ Pas de pagination ni de filtre. L’admin connecté est **exclu** de la liste.
 
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
-| `email` | string | **oui** | unique ; mis en minuscules ; format vérifié par le modèle |
-| `mot_de_passe` | string | **oui** | min 8 car. (aucune autre règle) |
-| `nom` | string | **oui** (modèle) | non nul |
-| `prenom` | string | **oui** (modèle) | non nul |
-| `adresse` | string | **oui** (modèle) | non nul ; `""` accepté |
-| `telephone` | string | non | unique (contrôlé seulement s’il est non vide) |
+Pas de Joi : contrôles faits à la main dans `gestionadmin.service.js`, avec les règles de `validations/common.js`.
 
-Le compte est créé avec `role: "Admin"` et `statut: "actif"`.
+| Champ | Type | Obligatoire | Contraintes |
+|---|---|---|---|
+| `email` | string | **oui** | e-mail valide (Joi `email`) ; `trim` + minuscules ; unique |
+| `mot_de_passe` | string | **oui** | 8 à 128 car., au moins 1 minuscule, 1 majuscule, 1 chiffre (même règle qu’à l’inscription) |
+| `nom` | string | **oui** | 2 à 50 car. après `trim` |
+| `prenom` | string | **oui** | 2 à 50 car. après `trim` |
+| `adresse` | string | non | `trim` ; absent → `""` |
+| `telephone` | string | non | `^\+?[0-9\s\-.]{7,20}$` ; vide ou absent → `NULL` ; unique |
+
+Ordre des contrôles : e-mail + mot de passe présents → format de l’e-mail → nom / prénom → téléphone → unicité e-mail → unicité téléphone → règle du mot de passe. Le compte est créé avec `role: "Admin"` et `statut: "actif"`.
 
 **Réponse 201 :** `{ "success": true, "message": "Admin créé avec succès", "data": { …utilisateur sans les champs privés } }`.
 
 > Le journal d’audit enregistre le corps de la requête avec `mot_de_passe` remplacé par `"***"` (voir §4).
 
-**Erreurs (400, `{ success: false, message }`) :** « Email et mot de passe sont obligatoires » · « Cet email est déjà utilisé » · « Ce numéro de téléphone est déjà utilisé » · « Le mot de passe doit contenir au moins 8 caractères » · « Erreur lors de la création de l'admin » (+ `error`, ex. champ nul, e-mail invalide, téléphone `""` en doublon) — puis 401 · 403 · 500 « Erreur serveur lors de l'ajout de l'admin ».
+**Erreurs (400, `{ success: false, message }`) :** « Email et mot de passe sont obligatoires » · « Adresse e-mail invalide » · « Le nom et le prénom sont obligatoires » · « Le nom et le prénom doivent contenir entre 2 et 50 caractères » · « Numéro de téléphone invalide » · « Cet email est déjà utilisé » · « Ce numéro de téléphone est déjà utilisé » · « Le mot de passe doit contenir au moins 8 caractères, une majuscule, une minuscule et un chiffre » — puis **500** « Erreur lors de la création de l'admin » (exception base) · 401 · 403 · 500 « Erreur serveur lors de l'ajout de l'admin ».
 
-**Admin :** `adminsApi.create({ nom, prenom, email, mot_de_passe, telephone, adresse })` (`src/api/admins.ts:8`), appelée par `AdminsPage.tsx:80`. Envoie `telephone: ""` et `adresse: ""` si non saisis.
+**Admin :** `adminsApi.create({ nom, prenom, email, mot_de_passe, telephone, adresse })` (`src/api/admins.ts:20`), appelée par `AdminsPage.tsx:89`. Envoie `telephone: ""` et `adresse: ""` si non saisis (le back les convertit).
 
 ---
 
@@ -350,7 +368,7 @@ Le compte est créé avec `role: "Admin"` et `statut: "actif"`.
 
 **Erreurs :** 404 « Admin introuvable » · 400 « Vous ne pouvez pas désactiver votre propre compte » · 400 « Impossible de désactiver le dernier administrateur actif » · 401 · 403 · 500 « Erreur lors de l'activation » / « … de la désactivation ».
 
-**Admin :** `adminsApi.activate(id)` / `adminsApi.deactivate(id)` (`src/api/admins.ts:10-11`), appelées par `AdminsPage.tsx:97`.
+**Admin :** `adminsApi.activate(id)` / `adminsApi.deactivate(id)` (`src/api/admins.ts:22-23`), appelées par `AdminsPage.tsx:107`.
 
 ---
 
@@ -360,7 +378,7 @@ Le compte est créé avec `role: "Admin"` et `statut: "actif"`.
 
 **Erreurs :** 401 · 403 · 500. Une erreur base renvoie **500** `{ success: false, message: "Erreur lors du comptage des admins" }`.
 
-**Admin :** `adminsApi.count()` (`src/api/admins.ts:6`), appelée par `DashboardPage.tsx:52`. Lit `data` (repli sur `nombre`).
+**Admin :** `adminsApi.count()` (`src/api/admins.ts:15`), appelée par `DashboardPage.tsx:59`. Lit `data` (repli sur `nombre`).
 
 ---
 
@@ -372,7 +390,7 @@ Le compte est créé avec `role: "Admin"` et `statut: "actif"`.
 
 **Erreurs :** 401 · 403 · 500. Une erreur base renvoie **500** `{ success: false, message: "Erreur lors de la recherche des admins" }`.
 
-**Admin :** `adminsApi.search(q)` existe (`src/api/admins.ts:7`) mais **n’est appelée nulle part** (la recherche se fait dans le navigateur).
+**Admin :** `adminsApi.search({ nom, prenom, email })` existe (`src/api/admins.ts:17`, typée tableau nu) mais **n’est appelée nulle part** (l’écran Admins cherche via `liste-admins?q=`).
 
 ---
 
@@ -396,7 +414,9 @@ Pagination facultative (`?page=&limit=`) et recherche `?q=` (nom, prénom, e-mai
 
 **Erreurs :** 401 · 403 · 500 « Erreur lors de la récupération des utilisateurs ».
 
-**Admin :** `clientsApi.list()` (`src/api/clients.ts:5`), appelée par `ClientsPage.tsx:20`. Lit `data` (repli sur `utilisateurs`).
+**Réponse 200 avec pagination :** `{ "success": true, "total": 152, "data": [ … ], "pagination": { "page": 1, "limit": 20, "total": 152, "pages": 8 } }` (`total` = toutes pages).
+
+**Admin :** `clientsApi.list({ page, limit, q })` (`src/api/clients.ts:8`), appelée par `ClientsPage.tsx:28`. Lit `data` et `pagination` (le total affiché vient de `pagination.total`).
 
 ---
 
@@ -406,12 +426,12 @@ Pagination facultative (`?page=&limit=`) et recherche `?q=` (nom, prénom, e-mai
 
 **Réponse 200 :** `{ "success": true, "message": "Utilisateur activé avec succès" | "Utilisateur désactivé avec succès", "data": { …utilisateur sans les champs privés } }`.
 
-**Erreurs :** 404 « Utilisateur non trouvé » · 400 « Utilisateur déjà actif » · 400 « Utilisateur déjà inactif » · 400 « Ce compte destinataire n'a pas encore été créé par la personne : elle doit s'inscrire dans l'application » (activation d’un compte automatique) — puis 401 · 403.
+**Erreurs :** 404 « Utilisateur non trouvé » · 400 « Utilisateur déjà actif » · 400 « Utilisateur déjà inactif » · 400 « Ce compte destinataire n'a pas encore été créé par la personne : elle doit s'inscrire dans l'application » (activation d’un compte automatique) — puis 401 · 403. Une exception base renvoie aussi **400** (message technique remplacé par « Requête invalide » par le filtre global).
 
 > Un client désactivé par un admin **ne peut plus être repris** par une nouvelle inscription avec son e-mail ou son téléphone (« Cet email est déjà utilisé ») : seul un compte automatique (`compteAuto = true`) est revendiqué à l’inscription. Avant, tout compte client inactif l’était, mot de passe compris.
 > Un compte désactivé reçoit **403** « Compte désactivé. Contactez le support. » sur toutes ses requêtes, même avec un jeton encore valide.
 
-**Admin :** `clientsApi.activate(id)` / `clientsApi.deactivate(id)` (`src/api/clients.ts:8-9`), appelées par `ClientsPage.tsx:31`.
+**Admin :** `clientsApi.activate(id)` / `clientsApi.deactivate(id)` (`src/api/clients.ts:16-17`), appelées par `ClientsPage.tsx:41`.
 
 ---
 
@@ -421,19 +441,19 @@ Pagination facultative (`?page=&limit=`) et recherche `?q=` (nom, prénom, e-mai
 
 **Erreurs :** 401 · 403 · 500 « Erreur lors du comptage des utilisateurs ».
 
-**Admin :** `clientsApi.count()` (`src/api/clients.ts:6`), appelée par `DashboardPage.tsx:51`. Lit `total` (repli sur `nombre`).
+**Admin :** `clientsApi.count()` (`src/api/clients.ts:12`), appelée par `DashboardPage.tsx:58`. Lit `total` (repli sur `nombre`).
 
 ---
 
 #### `GET /nanei/admin/rechercher-utilisateur`
 
-**Paramètres (query) :** `nom`, `prenom`, `email` — facultatifs, « contient » insensible à la casse (`%` et `_` pris littéralement), combinés par ET.
+**Paramètres (query) :** `nom`, `prenom`, `email` — facultatifs, « contient » insensible à la casse (`%` et `_` pris littéralement), combinés par ET. Seuls les `Particulier` inscrits (`compteAuto = false`), du plus récent au plus ancien. Pas de pagination.
 
 **Réponse 200 :** `{ "success": true, "data": [ … ] }`.
 
 **Erreurs :** 401 · 403 · 500 « Erreur lors de la recherche des utilisateurs ».
 
-**Admin :** `clientsApi.search(q)` existe (`src/api/clients.ts:7`) mais **n’est appelée nulle part**.
+**Admin :** `clientsApi.search({ nom, prenom, email })` existe (`src/api/clients.ts:14`) mais **n’est appelée nulle part** (l’écran Clients cherche via `liste-utilisateurs?q=`).
 
 ---
 
@@ -443,7 +463,7 @@ Pagination facultative (`?page=&limit=`) et recherche `?q=` (nom, prénom, e-mai
 |---|---|---|
 | GET | `/nanei/admin/audit-logs` | jeton **Admin** |
 
-Les entrées sont créées automatiquement par le middleware `auditLog(action, entite)`, **après** une réponse 2xx/3xx. Actions utilisées dans le back : `CREATE`, `UPDATE`, `UPDATE_STATUT`, `DELETE`, `ACTIVATE`, `DEACTIVATE`, `REPLY`, `BULK_UPSERT`, `GENERATE`.
+Les entrées sont créées automatiquement par le middleware `auditLog(action, entite)`, **après** une réponse 2xx/3xx. Actions utilisées dans le back : `CREATE`, `UPDATE`, `UPDATE_STATUT`, `DELETE`, `ACTIVATE`, `DEACTIVATE`, `REPLY`, `BULK_UPSERT`, `GENERATE`, `EXPORT`. `entite_id` = `req.params.id`, sinon `colisId`, sinon `null`. `details` = `{ method, path, body }` (body masqué, hors GET) ou `{ method, path, query }` (GET avec paramètres, ex. exports).
 
 #### `GET /nanei/admin/audit-logs`
 
@@ -453,7 +473,7 @@ Les entrées sont créées automatiquement par le middleware `auditLog(action, e
 |---|---|---|---|
 | `page` | integer | `1` | page demandée |
 | `limit` | integer | `20` | taille de page, **100 maximum** |
-| `action` | string | — | égalité exacte (ex. `UPDATE_STATUT`) |
+| `action` | string | — | « contient », insensible à la casse (`update` trouve `UPDATE_STATUT`) ; `%` et `_` pris littéralement |
 | `entite` | string | — | égalité exacte (ex. `Colis`, `Admin`, `Utilisateur`) |
 | `admin_id` | UUID | — | auteur de l’action |
 | `date_debut` | date `AAAA-MM-JJ` | — | à partir de 00:00 ce jour-là |
@@ -467,6 +487,7 @@ Les entrées sont créées automatiquement par le middleware `auditLog(action, e
   "total": 87,
   "page": 1,
   "pages": 5,
+  "pagination": { "page": 1, "limit": 20, "total": 87, "pages": 5 },
   "logs": [
     {
       "id": "uuid",
@@ -489,7 +510,7 @@ Tri : du plus récent au plus ancien.
 
 > `details.body` contient le corps de la requête **avec les champs sensibles masqués** (`"***"`) : tout nom de champ contenant `pass`, `mot_de_passe`, `token`, `otp`, `secret`… (`auditlog.middleware.js`, `masquerChampsSensibles`). La migration `20261011140000-masquer-secrets-audit-logs.js` masque les lignes enregistrées avant ce correctif.
 
-**Admin :** `auditLogsApi.list({ page, limit: 20, admin_id, action, date_debut, date_fin })` (`src/api/auditLogs.ts`), appelée par `AuditLogPage.tsx`. Lit `logs`, `total`, `pages`, puis `log.admin.prenom/nom`, `log.entite_id`, `log.ip_address`, `log.createdAt`, `log.details`. La liste des admins du filtre inclut l’admin connecté (« moi »).
+**Admin :** `auditLogsApi.list({ page, limit: 20, admin_id, action, date_debut, date_fin })` (`src/api/auditLogs.ts:19`), appelée par `AuditLogPage.tsx:64` (`action` mis en majuscules, sans effet puisque la comparaison est insensible à la casse). Lit `logs`, `pagination` (repli sur `total`, `pages`), puis `log.admin.prenom/nom`, `log.entite_id`, `log.ip_address`, `log.createdAt`, `log.details`. La liste des admins du filtre inclut l’admin connecté (« moi »).
 
 ---
 
@@ -503,27 +524,27 @@ Tri : du plus récent au plus ancien.
 
 **Entité `message` :** `{ id, email, objet, description, createdAt, updatedAt }`. Pas de statut « répondu » : rien n’est enregistré après une réponse.
 
-> Doublons : les mêmes actions existent aussi sous `/nanei/messages` (`GET /`, `GET /stats`, `POST /:id/repondre`, jeton **Admin**), sans journal d’audit ni limite admin. L’admin ne les utilise pas.
+> Les anciens doublons sous `/nanei/messages` (`GET /`, `GET /stats`, `POST /:id/repondre`) ont été **retirés** (Annexe B.6, P2) : seul `POST /nanei/messages` (formulaire public) reste monté, hors périmètre.
 
 #### `GET /nanei/admin/messages/stats`
 
 **Réponse 200 :** `{ "success": true, "total": 42 }`.
 
-**Erreurs :** 401 · 403 · 500 `{ success: false, message: "Erreur serveur.", error }`.
+**Erreurs :** 401 · 403 · 500 `{ success: false, message: "Erreur serveur." }`.
 
-**Admin :** `messagesApi.stats()` existe (`src/api/messages.ts:13`) mais **n’est appelée nulle part**.
+**Admin :** `messagesApi.stats()` existe (`src/api/messages.ts:17`) mais **n’est appelée nulle part**.
 
 ---
 
 #### `GET /nanei/admin/messages`
 
-Pas de pagination. Du plus récent au plus ancien.
+**Paramètres (query) :** pagination facultative `page`, `limit` ; `q` (facultatif) : « contient », insensible à la casse, sur `email`, `objet` ou `description`. Du plus récent au plus ancien.
 
-**Réponse 200 :** `{ "success": true, "data": [ { id, email, objet, description, createdAt, updatedAt } ] }`.
+**Réponse 200 :** `{ "success": true, "data": [ { id, email, objet, description, createdAt, updatedAt } ] }` (+ `pagination` si `page` / `limit`).
 
-**Erreurs :** 401 · 403 · 500 `{ success: false, message: "Erreur serveur.", error }`.
+**Erreurs :** 401 · 403 · 500 `{ success: false, message: "Erreur serveur." }`.
 
-**Admin :** `messagesApi.list()` (`src/api/messages.ts:12`), appelée par `MessagesPage.tsx:18`. Lit `data`.
+**Admin :** `messagesApi.list({ page, limit, q })` (`src/api/messages.ts:15`), appelée par `MessagesPage.tsx:26`. Lit `data` et `pagination`.
 
 ---
 
@@ -539,9 +560,9 @@ La réponse est envoyée par e-mail (Resend) à `message.email`, objet « Répon
 
 **Réponse 200 :** `{ "success": true, "destinataire": "client@exemple.com", "message": "Réponse envoyée avec succès." }`.
 
-**Erreurs :** 400 « La réponse est requise. » · 404 « Message introuvable » · 401 · 403 · 500 `{ success: false, message: "<erreur d'envoi>" }`.
+**Erreurs :** 400 « La réponse est requise. » · 404 « Message introuvable » · 401 · 403 · 500 `{ success: false, message: "<erreur d'envoi>" }` (« Erreur serveur » si le texte est technique). Un `reponse` non textuel (ex. nombre) fait lever `reponse.trim` → 500 « Erreur serveur ».
 
-**Admin :** `messagesApi.repondre(id, reponse)` (`src/api/messages.ts:14`), appelée par `MessagesPage.tsx:25`.
+**Admin :** `messagesApi.repondre(id, reponse)` (`src/api/messages.ts:18`), appelée par `MessagesPage.tsx:35`.
 
 
 ---
@@ -569,7 +590,9 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
 | PUT | `/nanei/admin/changer-statut-livre/:id` | admin + audit log |
 | PUT | `/nanei/admin/changer-statut-recupere/:id` | admin + audit log |
 
-**Entité `colis` (listes admin) :** `{ id, reference, expediteurId, recepteurId, poids, prix, destination, description, type_colis, type_transport, statut, lot_id, createdAt, updatedAt, deletedAt, expediteur: { nom, prenom, email, telephone }, recepteur: { nom, prenom, email, telephone } }`.
+**Entité `colis` (listes admin) :** `{ id, reference, expediteurId, recepteurId, poids, prix, destination, description, type_colis, type_transport, statut, lot_id, taille_lot?, createdAt, updatedAt, deletedAt, expediteur: { nom, prenom, email, telephone }, recepteur: { nom, prenom, email, telephone } }`.
+
+- `taille_lot` : présent seulement si `lot_id` est non nul ; nombre total de colis du lot (toutes pages, tous statuts).
 
 - `type_colis` : nature du colis, texte libre (« Vêtement », « Document »…), peut être `null`.
 - `type_transport` : `aerien` | `maritime` (sans accent), peut être `null` pour les anciens colis.
@@ -582,9 +605,9 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
 
 #### `GET /nanei/admin/liste-colis`
 
-- **Paramètres :** aucun. **Pas de pagination**, pas de filtre. Tri : `created_at` décroissant.
+- **Paramètres (query) :** pagination facultative `page`, `limit` ; `q` (facultatif) : « contient », insensible à la casse, sur `reference` ou `destination`. Tri : `created_at` décroissant.
 
-**Réponse 200 :** `{ "success": true, "message": "Colis récupérés avec succès", "colis": [ { …colis } ] }`.
+**Réponse 200 :** `{ "success": true, "message": "Colis récupérés avec succès", "colis": [ { …colis } ] }` (+ `pagination` si `page` / `limit`).
 
 ```json
 { "success": true, "message": "Colis récupérés avec succès",
@@ -595,9 +618,9 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
                "recepteur": { "nom": "…", "prenom": "…", "email": "…", "telephone": "…" } } ] }
 ```
 
-**Erreurs :** 500 « Erreur serveur lors de la récupération des colis » (avec `error`).
+**Erreurs :** 500 « Erreur serveur lors de la récupération des colis ».
 
-**Admin :** `colisApi.list()` (`src/api/colis.ts:5`), sans paramètre. Utilisée par `ColisPage` (filtre « Tous »), `EtiquettesPage` et `DashboardPage` (8 derniers colis). L’admin lit `res.data.colis` (avec repli sur `res.data.data`).
+**Admin :** `colisApi.list(params)` (`src/api/colis.ts:11`). Utilisée par `ColisPage.tsx:298` (filtre « Tous » ; `page`, `limit`, `q`), `EtiquettesPage.tsx:33` (`page`, `limit`, `q`) et `DashboardPage.tsx:81` (`page=1&limit=8`, 8 derniers colis). L’admin lit `colis` et `pagination`.
 
 ---
 
@@ -607,20 +630,20 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
 
 **Erreurs :** 500 « Erreur serveur comptage colis ».
 
-**Admin :** `colisApi.count()` (`src/api/colis.ts:6`). `DashboardPage` lit `nombre_colis` (repli `total`, `nombre`).
+**Admin :** `colisApi.count()` (`src/api/colis.ts:12`). `DashboardPage.tsx:60` lit `nombre_colis` (repli `total`, `nombre`).
 
 ---
 
 #### `GET /nanei/admin/colis-en-attente` · `GET /nanei/admin/colis-livres` · `GET /nanei/admin/colis-recuperes`
 
-- **Paramètres :** aucun. Pas de pagination. Tri : `created_at` décroissant.
+- **Paramètres (query) :** mêmes que `liste-colis` (`page`, `limit`, `q`). Tri : `created_at` décroissant.
 - Filtre fixe : `statut = en_attente` / `livre` / `recupere`.
 
-**Réponse 200 :** même forme que `liste-colis` : `{ success: true, message: "Colis récupérés avec succès", colis: [ … ] }`.
+**Réponse 200 :** même forme que `liste-colis` : `{ success: true, message, colis: [ … ] }` (+ `pagination`). Messages : « Colis en attente récupérés avec succès » · « Colis livrés récupérés avec succès » · « Colis récupérés avec succès » (récupérés).
 
 **Erreurs :** 500 « Erreur serveur colis en attente » · « Erreur serveur colis livrés » · « Erreur serveur colis récupérés ».
 
-**Admin :** `colisApi.enAttente()`, `colisApi.livres()`, `colisApi.recuperes()` (`src/api/colis.ts:7-9`). Appelées par `ColisPage` selon le filtre ; `enAttente()` aussi par `DashboardPage` (alerte « colis bloqués » > 3 jours).
+**Admin :** `colisApi.enAttente()`, `colisApi.recuperes()`, `colisApi.livres()` (`src/api/colis.ts:13-15`). Appelées par `ColisPage.tsx:295-297` selon le filtre (`page`, `limit`, `q`) ; `enAttente()` aussi par `DashboardPage.tsx:69`, **sans** pagination (alerte « colis bloqués » > 3 jours calculée côté navigateur).
 
 ---
 
@@ -630,7 +653,7 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
 
 **Erreurs :** 500 « Erreur serveur comptage en attente » · « Erreur serveur comptage livrés » · « Erreur serveur comptage récupérés ».
 
-**Admin :** `colisApi.countEnAttente()`, `countLivres()`, `countRecuperes()` (`src/api/colis.ts:10-12`), lues par `DashboardPage` via `nombre_colis`.
+**Admin :** `colisApi.countEnAttente()`, `countRecuperes()`, `countLivres()` (`src/api/colis.ts:16-18`), lues par `DashboardPage.tsx:61-63` via `nombre_colis`.
 
 ---
 
@@ -644,7 +667,7 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
 
 **Erreurs :** 500 « Erreur serveur recherche colis ».
 
-**Admin :** `colisApi.search(ref)` existe (`src/api/colis.ts:13`) mais **n’est appelée par aucun écran** (la recherche de `ColisPage` filtre côté navigateur).
+**Admin :** `colisApi.search(ref)` existe (`src/api/colis.ts:20`) mais **n’est appelée par aucun écran** (la recherche de `ColisPage` passe par `?q=` sur les listes).
 
 ---
 
@@ -654,9 +677,17 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
 - **Paramètre de chemin :** `id` = UUID du colis.
 - **Corps :** aucun.
 
-**Transitions :** aucun contrôle (ex. `livre` → `en_attente` permis). Vers le **même** statut : ni historique ni notification.
+**Transitions autorisées** (`gestioncolis.service.js`, `TRANSITIONS`) :
 
-**Effets de bord :**
+| Statut actuel | Vers |
+|---|---|
+| `en_attente` | `recupere`, `livre` |
+| `recupere` | `livre`, `en_attente` |
+| `livre` | aucun (statut définitif) |
+
+Vers le **même** statut ou transition non listée → **409**, rien n’est modifié.
+
+**Effets de bord (transition acceptée) :**
 1. `colis.statut` mis à jour.
 2. Ligne `colis_historiques` `{ colis_id, ancien_statut, nouveau_statut, admin_id }` — **avant** la réponse.
 3. **Après** la réponse, en arrière-plan : notification push (FCM) à l’expéditeur et au destinataire s’ils ont un `fcm_token` (titre « Mise à jour colis », données `{ colisId, statut }`).
@@ -669,9 +700,11 @@ Toutes les routes de cette section sont dans `src/routes/admin/gestioncolis.rout
 **Réponse 200 :** `{ "success": true, "message": "<message>", "colis": { …colis sans expediteur/recepteur } }`.
 Messages : « Colis mis en attente avec succès » · « Colis marqué comme récupéré » · « Colis marqué comme livré ».
 
-**Erreurs :** 404 « Colis introuvable » (`{ success: false, message }`) · 500 « Erreur changement statut en attente » · « Erreur changement statut récupéré » · « Erreur changement statut livré » (avec `error`). Un `id` qui n’est pas un UUID donne une erreur Postgres → 500.
+**Erreurs :** 404 « Colis introuvable » (`{ success: false, message }`) · 409 « Le colis est déjà « En attente » » (ou « Récupéré », « Livré ») · 409 « Un colis livré ne peut plus changer de statut » · 409 « Passage de « Récupéré » à « … » non autorisé » (libellés des statuts) · 500 « Erreur changement statut en attente » · « Erreur changement statut récupéré » · « Erreur changement statut livré ». Un `id` qui n’est pas un UUID donne une erreur Postgres → 500.
 
-**Admin :** `colisApi.setEnAttente(id)`, `setRecupere(id)`, `setLivre(id)` (`src/api/colis.ts:14-16`), sans corps, depuis le sélecteur de statut de `ColisPage` (après confirmation). L’admin ignore la réponse et recharge les listes, les compteurs et l’alerte « colis bloqués » du tableau de bord.
+> Une erreur à l’écriture de l’historique ou des notifications est journalisée et **n’empêche pas** la réponse 200.
+
+**Admin :** `colisApi.setEnAttente(id)`, `setRecupere(id)`, `setLivre(id)` (`src/api/colis.ts:25-27`), sans corps, depuis le sélecteur de statut de `ColisPage.tsx:323-325` (après confirmation ; seules les transitions permises sont proposées, un 409 affiche le message du back). L’admin ignore le contenu de la réponse et recharge les listes, les compteurs et l’alerte « colis bloqués » du tableau de bord.
 
 ---
 
@@ -687,7 +720,7 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 - **Paramètre de chemin :** `colisId` = UUID du colis. Aucun contrôle de propriétaire (l’admin voit tous les colis).
 - **Query :** `format` (optionnel). `zpl` → fichier ZPL ; toute autre valeur ou absent → PDF.
 
-**Contenu de l’étiquette :** référence, nom/prénom/téléphone/e-mail de l’expéditeur et du destinataire, pays expéditeur (**toujours « MALI »**, valeur fixe), pays destinataire (= `colis.destination`), type de transport (`aerien` | `maritime`, déduit de `type_transport`, sinon de `type_colis`, sinon `aerien`), poids, date. QR code vers `{BACKEND_URL}/nanei/suivi/{reference}`.
+**Contenu de l’étiquette :** référence, nom/prénom/téléphone/e-mail de l’expéditeur et du destinataire, pays expéditeur (déduit de l’indicatif du téléphone de l’expéditeur, `utils/paysDepuisTelephone.js` ; inconnu → `PAYS_ORIGINE_DEFAUT`, « MALI » par défaut), pays destinataire (= `colis.destination`), type de transport (`aerien` | `maritime`, déduit de `type_transport`, sinon de `type_colis`, sinon `aerien`), poids, date. QR code vers `{BACKEND_URL}/nanei/suivi/{reference}`.
 
 **Réponse 200 (PDF) :**
 - `Content-Type: application/pdf`
@@ -697,14 +730,14 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 
 **Réponse 200 (`?format=zpl`) :**
 - `Content-Type: text/plain; charset=utf-8`
-- `Content-Disposition: attachment; filename="etiquette-{reference}.zpl"`
+- `Content-Disposition: attachment; filename="etiquette-{reference}.zpl"`, `Cache-Control: no-cache`
 - Corps : texte ZPL, étiquette 100 × 150 mm, 203 dpi.
 
-**Erreurs :** 404 « Colis introuvable » · 500 `{ success: false, message: <message technique de l’erreur> }` (repli « Erreur génération étiquette »).
+**Erreurs :** 404 « Colis introuvable » · 500 `{ success: false, message: <message de l’erreur> }` (repli « Erreur génération étiquette » ; « Erreur serveur » si le message est technique).
 
-**Admin :** `etiquettesApi.telecharger(colisId)` (`src/api/etiquettes.ts:4-5`, `responseType: 'blob'`) et `etiquettesApi.telechargerZPL(colisId)` (`src/api/etiquettes.ts:6-7`, `params: { format: 'zpl' }`, blob). `EtiquettesPage` enregistre le blob via `downloadBlob` sous `etiquette-{reference}.pdf|.zpl` ; pour le ZPL il lit aussi `blob.text()` pour l’afficher et le copier.
+**Admin :** `etiquettesApi.telecharger(colisId)` (`src/api/etiquettes.ts:4-5`, `responseType: 'blob'`, délai 60 s) et `etiquettesApi.telechargerZPL(colisId)` (`src/api/etiquettes.ts:6-7`, `params: { format: 'zpl' }`, blob), appelées par `EtiquettesPage.tsx:47` et `:62`. `EtiquettesPage` enregistre le blob via `downloadBlob` sous `etiquette-{reference}.pdf|.zpl` ; pour le ZPL il lit aussi `blob.text()` pour l’afficher et le copier.
 
-> Avec `responseType: 'blob'`, une erreur 404/500 arrive aussi en blob : l’admin affiche seulement « Impossible de télécharger l'étiquette ».
+> Avec `responseType: 'blob'`, une erreur 404/500 arrive aussi en blob : l’admin relit le `message` JSON dans le blob (`messageErreurTelechargement`, `EtiquettesPage.tsx:53, 71`), repli « Impossible de télécharger l'étiquette ».
 
 ---
 
@@ -715,7 +748,7 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 | POST | `/nanei/admin/colis/:colisId/preuve` | admin + audit log |
 | GET | `/nanei/admin/colis/:colisId/preuve` | admin |
 
-**Entité `preuve` :** `{ id, colis_id, photo_url, commentaire, gps_lat, gps_lng, createdAt }` (pas de `updatedAt`). Une seule preuve par colis (`colis_id` unique).
+**Entité `preuve` :** `{ id, colis_id, photo_url, commentaire, gps_lat, gps_lng, createdAt }` (pas de `updatedAt` : modèle `updatedAt: false`). Une seule preuve par colis (`colis_id` unique).
 
 #### `POST /nanei/admin/colis/:colisId/preuve`
 
@@ -724,23 +757,23 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
-| `photo` | fichier | **oui** | un seul fichier ; `image/png`, `image/jpeg`, `image/jpg` ou `image/webp` (selon le `Content-Type` du fichier) ; 15 Mo max |
-| `commentaire` | string | non | — |
-| `gps_lat` | string (nombre) | non | converti par `parseFloat` |
-| `gps_lng` | string (nombre) | non | converti par `parseFloat` |
+| `photo` | fichier | **oui** | un seul fichier ; `Content-Type` `image/png`, `image/jpeg`, `image/jpg` ou `image/webp` ; 15 Mo max ; contenu vérifié ensuite par signature binaire |
+| `commentaire` | string | non | vide → `null` |
+| `gps_lat` | string (nombre) | non | converti par `parseFloat` ; vide → `null` |
+| `gps_lng` | string (nombre) | non | converti par `parseFloat` ; vide → `null` |
+| `remplacer` | `"true"` | non | en query (`?remplacer=true`) ou dans le formulaire (insensible à la casse). Obligatoire pour **remplacer** une preuve existante |
 
-| `remplacer` | `"true"` | non | en query (`?remplacer=true`) ou dans le formulaire. Obligatoire pour **remplacer** une preuve existante |
+Ordre des contrôles : colis existant → colis au statut **`livre`** (sinon **409**) → photo présente → preuve existante sans `remplacer` (**409**) → envoi R2.
 
-- Pas de contrôle du statut du colis (on peut ajouter une preuve à un colis non livré).
-- La photo est envoyée sur Cloudflare R2 (`nanei/preuves/…`) ; `photo_url` est l’URL publique.
-- **Une seule preuve par colis.** Si elle existe et que `remplacer` n’est pas `true` → **409**, rien n’est envoyé sur R2 ni modifié.
+- La photo est envoyée sur Cloudflare R2 (`nanei/preuves/…`, extension = type réel) ; `photo_url` est l’URL publique.
+- **Une seule preuve par colis.** Si elle existe et que `remplacer` n’est pas `true` → **409**, rien n’est envoyé sur R2 ni modifié. Avec `remplacer=true`, l’ancienne ligne est supprimée et recréée (transaction) : `createdAt` = date de la nouvelle photo.
 
-**Réponse 201 :** `{ "success": true, "message": "Preuve ajoutée", "preuve": { id, colis_id, photo_url, commentaire, gps_lat, gps_lng, createdAt, updatedAt } }`.
+**Réponse 201 :** `{ "success": true, "message": "Preuve ajoutée", "preuve": { id, colis_id, photo_url, commentaire, gps_lat, gps_lng, createdAt } }`.
 **Réponse 200 (remplacement confirmé) :** `{ "success": true, "message": "Preuve remplacée", "preuve": { … } }`.
 
-**Erreurs :** 409 « Une preuve de livraison existe déjà pour ce colis. Confirmez le remplacement pour l'écraser. » (+ `preuve` existante) · 404 « Colis introuvable » · 400 « Photo obligatoire » · 400 « Type de fichier non autorisé » · 413 « Fichier trop volumineux » · 400 « Trop de fichiers ou champ de fichier inattendu » · 500 « Erreur serveur ».
+**Erreurs :** 404 « Colis introuvable » · 409 « Le colis doit être marqué « Livré » avant d'ajouter une preuve de livraison » · 400 « Photo obligatoire » · 409 « Une preuve de livraison existe déjà pour ce colis. Confirmez le remplacement pour l'écraser. » (+ `preuve` existante) · 400 « Type de fichier non autorisé » (`Content-Type`) · 400 « Type de fichier non autorisé (contenu non reconnu comme image PNG, JPEG, WEBP ou PDF) » (signature) · 413 « Fichier trop volumineux » · 400 « Trop de fichiers ou champ de fichier inattendu » · 500 « Erreur serveur ».
 
-**Admin :** `preuveLivraisonApi.upload(colisId, formData, remplacer)` (`src/api/preuveLivraison.ts`), `FormData` avec le champ `photo`. Modale « Preuve de livraison » de `ColisPage` (visible pour un colis `livre`) : bouton « Ajouter une preuve » s’il n’y en a pas, « Remplacer la photo » (avec confirmation, `remplacer=true`) sinon.
+**Admin :** `preuveLivraisonApi.upload(colisId, formData, remplacer)` (`src/api/preuveLivraison.ts:25`, délai 60 s), appelée par `ColisPage.tsx:161`, `FormData` avec le seul champ `photo` (ni commentaire ni GPS envoyés). Modale « Preuve de livraison » de `ColisPage` (visible pour un colis `livre`) : bouton « Ajouter une preuve » s’il n’y en a pas, « Remplacer la photo » (avec confirmation, `remplacer=true`) sinon.
 
 ---
 
@@ -750,7 +783,7 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 
 **Erreurs :** 404 « Aucune preuve trouvée » · 500 « Erreur serveur ».
 
-**Admin :** `preuveLivraisonApi.get(colisId)` (`src/api/preuveLivraison.ts`) lit `preuve` et renvoie `null` sur 404. `ColisPage` affiche `photo_url`, `commentaire`, la position GPS (`gps_lat`, `gps_lng`) et la date. Une autre erreur affiche « Impossible de charger la preuve » sans proposer d’envoi (pas d’écrasement à l’aveugle).
+**Admin :** `preuveLivraisonApi.get(colisId)` (`src/api/preuveLivraison.ts:10`, appelée par `ColisPage.tsx:144`) lit `preuve` (repli `data`) et renvoie `null` sur 404. `ColisPage` affiche `photo_url`, `commentaire`, la position GPS (`gps_lat`, `gps_lng`) et la date. Une autre erreur affiche « Impossible de charger la preuve » sans proposer d’envoi (pas d’écrasement à l’aveugle).
 
 ---
 
@@ -763,7 +796,7 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 #### `GET /nanei/admin/avis`
 
 - **Fichier :** `src/routes/admin/avis.route.js` → `avis.controller.adminAvis`.
-- **Paramètres (query) :** `note` (facultatif, entier 1 à 5) filtre la liste. Pas de pagination. Tri : `created_at` décroissant.
+- **Paramètres (query) :** `note` (facultatif, entier 1 à 5) filtre la liste ; toute autre valeur est **ignorée** (pas d’erreur, liste non filtrée). Pagination facultative `page`, `limit`. Tri : `created_at` décroissant.
 
 **Réponse 200 :**
 
@@ -777,11 +810,12 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 ```
 
 - `note_moyenne` : arrondie à 1 décimale, `0` s’il n’y a aucun avis.
-- `stats` est calculé sur **tous** les avis, même quand `note` filtre la liste.
+- `stats` est calculé en base sur **tous** les avis, même quand `note` filtre la liste ou qu’une page est demandée.
+- Avec `page` / `limit`, la réponse contient en plus `pagination`.
 
 **Erreurs :** 500 « Erreur serveur ».
 
-**Admin :** `avisApi.list(note?)` (`src/api/avis.ts`) envoie `?note=n` quand un filtre est choisi, lit `avis` et `stats`, et convertit chaque avis : `colis.reference` → `colisReference`, `utilisateur` → `client`. `AvisPage` affiche ces champs.
+**Admin :** `avisApi.list({ note, page, limit })` (`src/api/avis.ts:52`, appelée par `AvisPage.tsx:58`) envoie `?note=n` quand un filtre est choisi, lit `avis` et `stats`, et convertit chaque avis : `colis.reference` → `colisReference`, `utilisateur` → `client`. `AvisPage` affiche ces champs.
 
 ---
 
@@ -796,14 +830,14 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 
 #### `GET /nanei/admin/reclamations`
 
-- **Query :** `statut` (optionnel) ∈ `ouverte` | `en_cours` | `resolue` | `rejetee`. Pas de pagination. Tri : `created_at` décroissant.
-- Une valeur de `statut` hors liste fait échouer la requête Postgres (enum) → 500.
+- **Query :** `statut` (optionnel) ∈ `ouverte` | `en_cours` | `resolue` | `rejetee` ; pagination facultative `page`, `limit`. Tri : `created_at` décroissant.
+- Une valeur de `statut` hors liste → **400**.
 
-**Réponse 200 :** `{ "success": true, "reclamations": [ { …reclamation } ] }`.
+**Réponse 200 :** `{ "success": true, "reclamations": [ { …reclamation } ] }` (+ `pagination` si `page` / `limit`).
 
-**Erreurs :** 500 « Erreur serveur ».
+**Erreurs :** 400 « Statut invalide (ouverte, en_cours, resolue, rejetee) » · 500 « Erreur serveur ».
 
-**Admin :** `reclamationsApi.list(statut?)` (`src/api/reclamations.ts`), `?statut=` seulement si le filtre n’est pas « Toutes ». Lit `reclamations` et convertit : `colis.reference` → `colisReference`, `utilisateur` → `client`, `commentaire_admin` → `commentaireAdmin`, type `endommagé` (avec accent).
+**Admin :** `reclamationsApi.list({ statut, page, limit })` (`src/api/reclamations.ts:57`, appelée par `ReclamationsPage.tsx:256`), `?statut=` seulement si le filtre n’est pas « Toutes ». Lit `reclamations` et convertit : `colis.reference` → `colisReference`, `utilisateur` → `client`, `commentaire_admin` → `commentaireAdmin`, type `endommagé` (avec accent).
 
 ---
 
@@ -833,7 +867,7 @@ Messages : « Colis mis en attente avec succès » · « Colis marqué comme ré
 
 **Erreurs :** 400 « Statut invalide (ouverte, en_cours, resolue ou rejetee) » · 404 « Réclamation introuvable » · 500 « Erreur serveur ».
 
-**Admin :** `reclamationsApi.update(id, statut, commentaire?)` (`src/api/reclamations.ts`) envoie `{ statut, commentaire_admin }`. La modale de `ReclamationsPage` affiche aussi le dernier message envoyé au client (`commentaire_admin`).
+**Admin :** `reclamationsApi.update(id, statut, commentaire?)` (`src/api/reclamations.ts:67`, appelée par `ReclamationsPage.tsx:122`) envoie `{ statut, commentaire_admin }` (`commentaire_admin` seulement s’il est défini). La modale de `ReclamationsPage` affiche aussi le dernier message envoyé au client (`commentaire_admin`).
 
 ---
 
@@ -865,9 +899,9 @@ Chaque export est tracé dans le journal d’audit (`action: "EXPORT"`, `entite:
 
 **Réponse 200 (xlsx) :** `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` · `Content-Disposition: attachment; filename=colis-export.xlsx`. Une feuille « Colis ».
 
-**Erreurs :** 400 « Statut invalide (…) » · 400 « Date invalide (format AAAA-MM-JJ) » · 500 `{ success: false, message: "Erreur export" }`.
+**Erreurs :** 400 « Statut invalide (en_attente, recupere, livre) » · 400 « Date invalide (format AAAA-MM-JJ) » · 500 `{ success: false, message: "Erreur export" }`.
 
-**Admin :** `exportApi.colis(format, params)` (`src/api/export.ts:4-5`, `responseType: 'blob'`), `params` ⊂ `{ statut, date_debut, date_fin }` (champs vides non envoyés). `ExportPage` propose `en_attente` · `recupere` · `livre` et des champs `type="date"`. Fichier enregistré sous `colis-export.csv|xlsx`.
+**Admin :** `exportApi.colis(format, params)` (`src/api/export.ts:4-5`, `responseType: 'blob'`, délai 60 s), appelée par `ExportPage.tsx:80`, `params` ⊂ `{ statut, date_debut, date_fin }` (champs vides non envoyés). `ExportPage` propose `en_attente` · `recupere` · `livre` et des champs `type="date"`. Fichier enregistré sous `colis-export.csv|xlsx`.
 
 ---
 
@@ -881,9 +915,9 @@ Chaque export est tracé dans le journal d’audit (`action: "EXPORT"`, `entite:
 
 **Réponse 200 :** CSV (`filename=paiements-export.csv`) ou xlsx (`filename=paiements-export.xlsx`, feuille « Paiements »), mêmes en-têtes HTTP que l’export colis.
 
-**Erreurs :** 400 (statut, date) · 500 « Erreur export ».
+**Erreurs :** 400 « Statut invalide (en_attente, en_cours, paye, echoue, rembourse) » · 400 « Date invalide (format AAAA-MM-JJ) » · 500 « Erreur export ».
 
-**Admin :** `exportApi.paiements(format, params)` (`src/api/export.ts:6-7`, blob), `params` ⊂ `{ date_debut, date_fin }` (pas de filtre `statut` dans l’écran). Fichier enregistré sous `paiements-export.csv|xlsx`. Délai 60 s. En cas d’erreur, l’écran lit le message du back dans la réponse (reçue en blob) au lieu d’un texte fixe.
+**Admin :** `exportApi.paiements(format, params)` (`src/api/export.ts:6-7`, blob), appelée par `ExportPage.tsx:99`, `params` ⊂ `{ date_debut, date_fin }` (pas de filtre `statut` dans l’écran). Fichier enregistré sous `paiements-export.csv|xlsx`. Délai 60 s. En cas d’erreur, l’écran lit le message du back dans la réponse (reçue en blob) au lieu d’un texte fixe.
 
 
 ---
@@ -914,13 +948,13 @@ Erreurs communes à toutes les routes (middlewares) : 401 « Token manquant ou i
 |---|---|---|---|
 | `isActive` | string | non | `"true"` → pays actifs ; toute autre valeur → pays inactifs ; absent → tous |
 
-Pas de pagination. Tri par `name` croissant.
+Pagination facultative `page`, `limit` (middleware `paginerReponse('data')` : la liste complète est lue puis découpée). Tri par `name` croissant.
 
-**Réponse 200 :** `{ "message": "Pays récupérés avec succès", "data": [ { "id": "…", "name": "France", "code": "FRA", "isActive": true, "createdAt": "…", "updatedAt": "…" } ] }`.
+**Réponse 200 :** `{ "message": "Pays récupérés avec succès", "data": [ { "id": "…", "name": "France", "code": "FRA", "isActive": true, "createdAt": "…", "updatedAt": "…" } ] }` (pas de clé `success` ; + `pagination` si `page` / `limit`).
 
-**Erreurs :** 400 `{ success: false, message: "Erreur lors de la récupération des pays", error }` · 500 `{ message: "Erreur serveur", error }`.
+**Erreurs :** 500 `{ success: false, message: "Erreur lors de la récupération des pays" }` (exception base, `statutEchec`) · 500 `{ message: "Erreur serveur" }`.
 
-**Admin :** `countriesApi.list()` (`src/api/countries.ts:5`), sans paramètre, appelée par `CountriesPage` (onglet Pays et listes déroulantes). Lit `res.data.data`.
+**Admin :** `countriesApi.list(params)` (`src/api/countries.ts:10`), appelée par `CountriesPage.tsx:138` (onglet Pays : `page`, `limit`) et `CountriesPage.tsx:149` (sans paramètre : listes déroulantes). Lit `data` et `pagination`.
 
 ---
 
@@ -928,9 +962,9 @@ Pas de pagination. Tri par `name` croissant.
 
 **Réponse 200 :** `{ "message": "Pays récupéré avec succès", "data": { …country } }`.
 
-**Erreurs :** 404 `{ success: false, message: "Pays non trouvé" }` · 404 « Erreur lors de la récupération du pays » (ex. `id` qui n’est pas un UUID) · 500.
+**Erreurs :** 404 `{ success: false, message: "Pays non trouvé" }` · 500 « Erreur lors de la récupération du pays » (exception base, ex. `id` qui n’est pas un UUID) · 500.
 
-**Admin :** `countriesApi.getById()` existe (`src/api/countries.ts:6`) mais n’est **jamais appelée**.
+**Admin :** `countriesApi.getById()` existe (`src/api/countries.ts:11`) mais n’est **jamais appelée**.
 
 ---
 
@@ -946,11 +980,11 @@ Pas de pagination. Tri par `name` croissant.
 
 **Réponse 201 :** `{ "success": true, "message": "Pays créé avec succès", "data": { …country } }`.
 
-**Erreurs :** 400 « Le nom et le code du pays sont obligatoires » · 400 « Un pays avec ce code existe déjà » · 400 « Un pays avec ce nom existe déjà » · 400 « Erreur lors de la création du pays » (+ `error`, ex. code de plus de 3 caractères) · 500.
+**Erreurs :** 400 « Le nom et le code du pays sont obligatoires » · 400 « Un pays avec ce code existe déjà » · 400 « Un pays avec ce nom existe déjà » · **500** « Erreur lors de la création du pays » (exception base, ex. code de plus de 3 caractères) · 500.
 
-> Doublons contrôlés avant l’insertion : code comparé en majuscules, nom sans tenir compte de la casse.
+> Doublons contrôlés avant l’insertion : code comparé en majuscules, nom sans tenir compte de la casse. `name` est enregistré après `trim`.
 
-**Admin :** `countriesApi.create({ name, code, isActive })` (`src/api/countries.ts:7`) depuis la modale Pays de `CountriesPage` ; le code est saisi en majuscules, 3 caractères max.
+**Admin :** `countriesApi.create({ name, code, isActive })` (`src/api/countries.ts:12`, appelée par `CountriesPage.tsx:156`) depuis la modale Pays ; le code est saisi en majuscules, 3 caractères max.
 
 ---
 
@@ -960,9 +994,9 @@ Pas de pagination. Tri par `name` croissant.
 
 **Réponse 200 :** `{ "success": true, "message": "Pays mis à jour avec succès", "data": { …country } }`.
 
-**Erreurs :** 400 « Pays non trouvé » (⚠️ 400, pas 404) · 400 « Un pays avec ce code existe déjà » · 400 « Un pays avec ce nom existe déjà » · 400 « Erreur lors de la mise à jour du pays » · 500.
+**Erreurs :** 404 « Pays non trouvé » · 400 « Un pays avec ce code existe déjà » · 400 « Un pays avec ce nom existe déjà » · 500 « Erreur lors de la mise à jour du pays » (exception base) · 500.
 
-**Admin :** `countriesApi.update(id, { name, code, isActive })` (`src/api/countries.ts:9`), modale Pays en mode édition.
+**Admin :** `countriesApi.update(id, { name, code, isActive })` (`src/api/countries.ts:14`, appelée par `CountriesPage.tsx:156`), modale Pays en mode édition.
 
 ---
 
@@ -972,9 +1006,9 @@ Suppression définitive.
 
 **Réponse 200 :** `{ "success": true, "message": "Pays supprimé avec succès" }`.
 
-**Erreurs :** 404 « Pays non trouvé » · **409** « Impossible de supprimer ce pays : il a encore des tarifs de transport et des tarifs de services. Supprimez d'abord les tarifs, ou désactivez le pays. » (tarifs nouveaux ou anciens, contacts favoris de clients) · 500 « Erreur lors de la suppression du pays ».
+**Erreurs :** 404 « Pays non trouvé » · **409** « Impossible de supprimer ce pays : il a encore {liens}. Supprimez d'abord les tarifs, ou désactivez le pays. », où {liens} réunit par « et » ce qui existe parmi « des tarifs de transport » (nouvelle ou ancienne table), « des tarifs de services » (idem) et « N contact(s) favori(s) de clients » · 500 « Erreur lors de la suppression du pays ».
 
-**Admin :** `countriesApi.delete(id)` (`src/api/countries.ts:11`), bouton Supprimer après confirmation.
+**Admin :** `countriesApi.delete(id)` (`src/api/countries.ts:16`, appelée par `CountriesPage.tsx:174`), bouton Supprimer après confirmation.
 
 ---
 
@@ -1014,13 +1048,13 @@ Règle de calcul (`src/services/pricingCalculator.service.js:30-51`, utilisée p
 
 #### `GET /nanei/admin/shipping-rates`
 
-**Query :** `countryId` (UUID, facultatif) filtre sur un pays. Pas de pagination. Tri par `countryId`.
+**Query :** `countryId` (UUID, facultatif) filtre sur un pays ; pagination facultative `page`, `limit` (`paginerReponse('data')`). Tri par `countryId`.
 
-**Réponse 200 :** `{ "success": true, "data": [ { "id": "…", "countryId": "…", "minWeightAerien": 0, "maxWeightAerien": 30, "priceAerienPerKg": 9.5, "minWeightMaritime": 0, "maxWeightMaritime": 500, "priceMaritimePerKg": 3, "country": { "id": "…", "name": "Mali", "code": "MLI" } } ] }`.
+**Réponse 200 :** `{ "success": true, "data": [ { "id": "…", "countryId": "…", "minWeightAerien": 0, "maxWeightAerien": 30, "priceAerienPerKg": 9.5, "minWeightMaritime": 0, "maxWeightMaritime": 500, "priceMaritimePerKg": 3, "country": { "id": "…", "name": "Mali", "code": "MLI" } } ] }` (+ `pagination`). Colonnes `FLOAT` : renvoyées en nombres.
 
-**Erreurs :** 500 `{ success: false, message: "Erreur serveur", error }`.
+**Erreurs :** 500 `{ success: false, message: "Erreur serveur" }`.
 
-**Admin :** `shippingRatesApi.list()` (`src/api/countries.ts:32`), onglet « Tarifs transport » de `CountriesPage`. Lit `res.data.data`.
+**Admin :** `shippingRatesApi.list(params)` (`src/api/countries.ts:37`), onglet « Tarifs transport » de `CountriesPage.tsx:194` (`page`, `limit`) et `:205` (sans paramètre : liste complète pour l’avertissement « ancienne grille »). Lit `data` et `pagination`.
 
 ---
 
@@ -1036,45 +1070,43 @@ Règle de calcul (`src/services/pricingCalculator.service.js:30-51`, utilisée p
 
 #### `POST /nanei/admin/shipping-rates`
 
-> Valeurs numériques contrôlées par le back : poids ≥ 0, prix > 0, poids max. > poids min. ; sinon 400 avec le champ en cause. L’admin accepte la virgule (« 4,75 ») : avant, `parseFloat` coupait à la virgule et enregistrait 4.
+> Valeurs numériques contrôlées par le back (`utils/validationNombres.js`) : nombre fini (type `number` ou chaîne numérique non vide ; « 4,75 », `""`, booléens refusés) ; poids min. ≥ 0, poids max. > 0, prix > 0, poids max. > poids min. ; sinon 400 avec le champ en cause. L’admin convertit lui-même la virgule (« 4,75 » → 4.75) avant l’envoi.
 
 **Corps**
 
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
 | `countryId` | UUID | **oui** | pays existant ; **un seul** tarif par pays |
-| `minWeightAerien` | number (kg) | **oui** | < `maxWeightAerien` |
-| `maxWeightAerien` | number (kg) | **oui** | — |
-| `priceAerienPerKg` | number (EUR/kg) | **oui** | aucun contrôle de signe |
-| `minWeightMaritime` | number (kg) | **oui** | < `maxWeightMaritime` |
-| `maxWeightMaritime` | number (kg) | **oui** | — |
-| `priceMaritimePerKg` | number (EUR/kg) | **oui** | aucun contrôle de signe |
+| `minWeightAerien` | number (kg) | **oui** | ≥ 0 ; < `maxWeightAerien` |
+| `maxWeightAerien` | number (kg) | **oui** | > 0 |
+| `priceAerienPerKg` | number (EUR/kg) | **oui** | > 0 |
+| `minWeightMaritime` | number (kg) | **oui** | ≥ 0 ; < `maxWeightMaritime` |
+| `maxWeightMaritime` | number (kg) | **oui** | > 0 |
+| `priceMaritimePerKg` | number (EUR/kg) | **oui** | > 0 |
 
-Les 7 champs sont obligatoires (`null` refusé, `0` accepté). Aucune règle sur les valeurs négatives.
+Les 7 champs sont obligatoires (`null` refusé, `0` accepté pour les poids min. seulement).
 
 **Réponse 201 :** `{ "success": true, "message": "Tarif créé avec succès", "data": { …shippingRate } }`.
 
-**Erreurs :** 400 « Tous les champs sont obligatoires (aérien + maritime) » · 400 « Poids min aérien doit être < poids max aérien » · 400 « Poids min maritime doit être < poids max maritime » · 400 « Pays non trouvé » · 400 « Un tarif existe déjà pour ce pays. Modifiez-le. » · 500.
+**Erreurs :** 400 « Tous les champs sont obligatoires (aérien + maritime) » · 400 « {Poids min. aérien \| Poids max. aérien \| Prix aérien / kg \| Poids min. maritime \| Poids max. maritime \| Prix maritime / kg} : nombre {positif ou nul \| strictement positif} attendu » · 400 « Poids min aérien doit être < poids max aérien » · 400 « Poids min maritime doit être < poids max maritime » · 404 « Pays non trouvé » · 400 « Un tarif existe déjà pour ce pays. Modifiez-le. » · 500.
 
 > Effet immédiat : dès sa création, cette ligne **remplace** l’ancienne table `shipping_prices` pour ce pays dans tous les calculs de prix.
 
-**Admin :** `shippingRatesApi.create(payload)` (`src/api/countries.ts:33`). Formulaire en deux étapes (maritime puis aérien) ; les 7 champs sont envoyés via `parseFloat`. Libellés « Poids (kg) » et « Prix par kg (€) ».
+**Admin :** `shippingRatesApi.create(payload)` (`src/api/countries.ts:38`, appelée par `CountriesPage.tsx:224`). Formulaire en deux étapes (maritime puis aérien) ; les 7 champs sont convertis par `nombreSaisi` (virgule acceptée, mêmes règles de signe que le back). Libellés « Poids (kg) » et « Prix par kg (€) ».
 
 ---
 
 #### `PUT /nanei/admin/shipping-rates/:id`
 
-> Valeurs numériques contrôlées par le back : poids ≥ 0, prix > 0, poids max. > poids min. ; sinon 400 avec le champ en cause. L’admin accepte la virgule (« 4,75 ») : avant, `parseFloat` coupait à la virgule et enregistrait 4.
+> Mêmes contrôles numériques que la création, sur les champs envoyés.
 
-**Corps :** mêmes champs, tous facultatifs (`null`/absent = valeur actuelle conservée). Le contrôle min < max n’est fait que si **les deux** bornes d’un même type sont envoyées.
+**Corps :** les 6 champs numériques, tous facultatifs (`null`/absent = valeur actuelle conservée). Le contrôle min < max est fait sur les valeurs **finales** (saisie fusionnée avec l’existant), pour chaque type. **`countryId` est ignoré** (le pays d’un tarif ne change pas).
 
 **Réponse 200 :** `{ "success": true, "message": "Tarif mis à jour", "data": { …shippingRate } }`.
 
-**Erreurs :** 400 « Tarif non trouvé » (⚠️ 400, pas 404) · 400 « Poids min aérien doit être < poids max aérien » · 400 « Poids min maritime doit être < poids max maritime » · 500.
+**Erreurs :** 404 « Tarif non trouvé » · 400 « … : nombre … attendu » (voir création) · 400 « Poids min aérien doit être < poids max aérien » · 400 « Poids min maritime doit être < poids max maritime » · 500.
 
-> `countryId` est modifiable mais **sans contrôle** : ni existence du pays (→ 500), ni unicité (deux tarifs possibles pour un même pays ; le calcul prendra alors une ligne au hasard).
-
-**Admin :** `shippingRatesApi.update(id, payload)` (`src/api/countries.ts:34`), envoie les 7 champs + `countryId` (liste Pays désactivée en édition, donc inchangé).
+**Admin :** `shippingRatesApi.update(id, payload)` (`src/api/countries.ts:39`, appelée par `CountriesPage.tsx:224`), envoie les 6 champs + `countryId` (ignoré par le back ; liste Pays désactivée en édition).
 
 ---
 
@@ -1086,7 +1118,7 @@ Les 7 champs sont obligatoires (`null` refusé, `0` accepté). Aucune règle sur
 
 > Effet : le pays **retombe** sur l’ancienne table `shipping_prices` (si elle contient des lignes), sinon il n’a plus de prix.
 
-**Admin :** `shippingRatesApi.delete(id)` (`src/api/countries.ts:35`), après confirmation.
+**Admin :** `shippingRatesApi.delete(id)` (`src/api/countries.ts:40`, appelée par `CountriesPage.tsx:255`), après confirmation.
 
 ---
 
@@ -1105,17 +1137,17 @@ Les 7 champs sont obligatoires (`null` refusé, `0` accepté). Aucune règle sur
 
 #### `GET /nanei/admin/shipping-prices`
 
-**Query :** `countryId` (UUID), `type` (`aérien` | `maritime`), facultatifs. Pas de pagination. Tri : pays, type, `minWeight`.
+**Query :** `countryId` (UUID), `type` (`aérien` | `maritime`, non validé), facultatifs ; pagination facultative `page`, `limit`. Tri : pays, type, `minWeight`.
 
-**Réponse 200 :** `{ "message": "Prix de transport récupérés avec succès", "data": [ …shippingPrice ] }`.
+**Réponse 200 :** `{ "message": "Prix de transport récupérés avec succès", "data": [ …shippingPrice ] }` (+ `pagination`).
 
-**Erreurs :** 400 « Erreur lors de la récupération des prix de transport » · 500.
+**Erreurs :** 500 « Erreur lors de la récupération des prix de transport » (exception base) · 500.
 
-**Admin :** `shippingPricesApi.list()` existe (`src/api/countries.ts:15`) mais n’est **jamais appelée**.
+**Admin :** `shippingPricesApi.list()` (`src/api/countries.ts:20`), appelée **sans paramètre** par `CountriesPage.tsx:334` (lecture seule : avertissement listant les pays encore en repli sur l’ancienne grille, V27). Lit `data[].countryId` et `data[].country.name`.
 
 #### `GET /nanei/admin/shipping-prices/:id`
 
-**Réponse 200 :** `{ "message": "Prix de transport récupéré avec succès", "data": { … } }`. **Erreurs :** 404 « Prix de transport non trouvé » · 404 « Erreur lors de la récupération du prix » · 500.
+**Réponse 200 :** `{ "message": "Prix de transport récupéré avec succès", "data": { … } }`. **Erreurs :** 404 « Prix de transport non trouvé » · 500 « Erreur lors de la récupération du prix » (exception base) · 500.
 
 **Admin :** non appelée par l’admin.
 
@@ -1125,17 +1157,19 @@ Les 7 champs sont obligatoires (`null` refusé, `0` accepté). Aucune règle sur
 |---|---|---|---|
 | `countryId` | UUID | **oui** | pays existant |
 | `type` | string | **oui** | `aérien` ou `maritime` exactement |
-| `minWeight` | number (kg) | **oui** | < `maxWeight` |
-| `maxWeight` | number (kg) | **oui** | — |
-| `pricePerKg` | number (EUR/kg) | **oui** | aucun contrôle de signe |
+| `minWeight` | number (kg) | **oui** | ≥ 0 ; < `maxWeight` |
+| `maxWeight` | number (kg) | **oui** | > 0 |
+| `pricePerKg` | number (EUR/kg) | **oui** | > 0 |
+
+Contrôle numérique : `utils/validationNombres.js` (nombre fini, chaîne numérique acceptée), message « {Poids minimum \| Poids maximum \| Prix / kg} : nombre … attendu ».
 
 **Chevauchements refusés** pour un même pays + type (test strict : `min < autreMax` et `max > autreMin`). Deux tranches qui se touchent (`0–10` et `10–20`) sont acceptées ; au calcul, 10 kg tombe dans la première.
 
 **Réponse 201 :** `{ "success": true, "message": "Prix de transport créé avec succès", "data": { …shippingPrice } }`.
 
-**Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « Type invalide. Doit être "aérien" ou "maritime" » · 400 « Le poids minimum doit être inférieur au poids maximum » · 400 « Pays non trouvé » · 400 « Une plage de poids qui chevauche existe déjà pour ce pays et ce type de transport » · 400 « Erreur lors de la création du prix » · 500.
+**Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « Type invalide. Doit être "aérien" ou "maritime" » · 400 « … : nombre … attendu » · 400 « Le poids minimum doit être inférieur au poids maximum » · 404 « Pays non trouvé » · 400 « Une plage de poids qui chevauche existe déjà pour ce pays et ce type de transport » · 500 « Erreur lors de la création du prix » (exception base) · 500.
 
-**Admin :** `shippingPricesApi.create()` existe (`src/api/countries.ts:16`), jamais appelée.
+**Admin :** `shippingPricesApi.create()` existe (`src/api/countries.ts:21`), jamais appelée.
 
 #### `POST /nanei/admin/shipping-prices/bulk`
 
@@ -1144,13 +1178,13 @@ Crée ou met à jour d’un coup les lignes aérien **et** maritime d’une mêm
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
 | `countryId` | UUID | **oui** | pays existant |
-| `minWeight`, `maxWeight` | number (kg) | **oui** | min < max |
-| `aerienPricePerKg`, `maritimePricePerKg` | number (EUR/kg) | **oui** | — |
+| `minWeight`, `maxWeight` | number (kg) | **oui** | min ≥ 0, max > 0, min < max |
+| `aerienPricePerKg`, `maritimePricePerKg` | number (EUR/kg) | **oui** | > 0 |
 | `aerienId`, `maritimeId` | UUID | non | si présent → mise à jour de cette ligne (sans contrôle de chevauchement) ; un id inconnu est ignoré sans erreur |
 
 **Réponse 200 :** `{ "success": true, "message": "Tarifs créés/mis à jour avec succès", "data": [ … ] }`.
 
-**Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « Le poids minimum doit être inférieur au poids maximum » · 400 « Pays non trouvé » · 400 « Chevauchement de poids pour le type aérien|maritime » · 400 `{ success: false, message: "Erreur serveur", error }` · 500.
+**Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « … : nombre … attendu » · 400 « Le poids minimum doit être inférieur au poids maximum » · 404 « Pays non trouvé » · 400 « Chevauchement de poids pour le type aérien|maritime » · 500 `{ success: false, message: "Erreur serveur" }` (exception base) · 500.
 
 > Pas de transaction : si la ligne aérien est créée puis la maritime refusée, l’aérien reste en base.
 
@@ -1158,17 +1192,17 @@ Crée ou met à jour d’un coup les lignes aérien **et** maritime d’une mêm
 
 #### `PUT /nanei/admin/shipping-prices/:id`
 
-Mêmes champs, facultatifs. **Réponse 200 :** `{ success: true, message: "Prix mis à jour avec succès", data }`. **Erreurs :** 400 « Prix de transport non trouvé » · 400 « Pays non trouvé » · 400 « Le poids minimum doit être inférieur au poids maximum » · 400 « Une plage de poids qui chevauche existe déjà » · 400 « Erreur lors de la mise à jour du prix » · 500.
+Mêmes champs, facultatifs (mêmes contrôles numériques ; `type`, s’il est envoyé, doit être `aérien` ou `maritime`). Le contrôle min < max porte sur les valeurs finales. **Réponse 200 :** `{ success: true, message: "Prix mis à jour avec succès", data }`. **Erreurs :** 404 « Prix de transport non trouvé » · 404 « Pays non trouvé » · 400 « … : nombre … attendu » · 400 « Type invalide. Doit être "aérien" ou "maritime" » · 400 « Le poids minimum doit être inférieur au poids maximum » · 400 « Une plage de poids qui chevauche existe déjà » · 500 « Erreur lors de la mise à jour du prix » (exception base) · 500.
 
-> Le contrôle de chevauchement n’est fait **que si `countryId` est envoyé** (`shippingPrice.service.js:191`). Le `type` n’est pas validé en mise à jour (erreur base → 400 générique).
+> Le contrôle de chevauchement n’est fait **que si `countryId` est envoyé** (avec au moins un poids ou le type).
 
-**Admin :** `shippingPricesApi.update()` existe (`src/api/countries.ts:18`), jamais appelée.
+**Admin :** `shippingPricesApi.update()` existe (`src/api/countries.ts:23`), jamais appelée.
 
 #### `DELETE /nanei/admin/shipping-prices/:id`
 
-**Réponse 200 :** `{ success: true, message: "Prix supprimé avec succès" }`. **Erreurs :** 404 « Prix de transport non trouvé » · 404 « Erreur lors de la suppression du prix » · 500.
+**Réponse 200 :** `{ success: true, message: "Prix supprimé avec succès" }`. **Erreurs :** 404 « Prix de transport non trouvé » · 500 « Erreur lors de la suppression du prix » (exception base) · 500.
 
-**Admin :** `shippingPricesApi.delete()` existe (`src/api/countries.ts:20`), jamais appelée.
+**Admin :** `shippingPricesApi.delete()` existe (`src/api/countries.ts:25`), jamais appelée.
 
 ---
 
@@ -1190,13 +1224,13 @@ Même logique que §13 : la **nouvelle** table `service_rates` (une ligne par pa
 
 #### `GET /nanei/admin/service-rates`
 
-Aucun filtre, pas de pagination. Tri par `createdAt` croissant.
+Aucun filtre ; pagination facultative `page`, `limit` (`paginerReponse('data')`). Tri par `createdAt` croissant.
 
-**Réponse 200 :** `{ "data": [ { "id": "…", "countryId": "…", "prixRecuperation": 10, "prixLivraison": 15, "country": { "id": "…", "name": "Mali", "code": "MLI" } } ] }` (pas de clé `success`).
+**Réponse 200 :** `{ "data": [ { "id": "…", "countryId": "…", "prixRecuperation": 10, "prixLivraison": 15, "country": { "id": "…", "name": "Mali", "code": "MLI" } } ] }` (pas de clé `success` ; + `pagination`).
 
-**Erreurs :** 500 `{ message: "Erreur serveur", error }`.
+**Erreurs :** 500 `{ message: "Erreur serveur" }`.
 
-**Admin :** `serviceRatesApi.list()` (`src/api/countries.ts:56`), onglet Services de `CountriesPage`. Lit `res.data.data`.
+**Admin :** `serviceRatesApi.list(params)` (`src/api/countries.ts:61`), onglet Services de `CountriesPage.tsx:276` (`page`, `limit`) et `:286` (sans paramètre : avertissement « ancienne grille »). Lit `data` et `pagination`.
 
 #### `GET /nanei/admin/service-rates/:id`
 
@@ -1206,33 +1240,33 @@ Aucun filtre, pas de pagination. Tri par `createdAt` croissant.
 
 #### `POST /nanei/admin/service-rates`
 
-> Valeurs numériques contrôlées par le back : poids ≥ 0, prix > 0, poids max. > poids min. ; sinon 400 avec le champ en cause. L’admin accepte la virgule (« 4,75 ») : avant, `parseFloat` coupait à la virgule et enregistrait 4.
+> Valeurs numériques contrôlées par le back (`utils/validationNombres.js`) : nombre fini **positif ou nul** (0 accepté : service gratuit) ; « 4,75 », `""`, booléens refusés ; sinon 400 avec le champ en cause. L’admin convertit la virgule avant l’envoi.
 
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
 | `countryId` | UUID | **oui** | pays existant ; **un seul** tarif de service par pays |
-| `prixRecuperation` | number (EUR) | **oui** | absent refusé ; aucun contrôle de signe |
-| `prixLivraison` | number (EUR) | **oui** | idem |
+| `prixRecuperation` | number (EUR) | **oui** | ≥ 0 ; absent refusé |
+| `prixLivraison` | number (EUR) | **oui** | ≥ 0 ; absent refusé |
 
 **Réponse 201 :** `{ "success": true, "message": "Tarif service créé avec succès", "data": { …serviceRate } }`.
 
-**Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « Pays non trouvé » · 400 « Un tarif de service existe déjà pour ce pays » · 500.
+**Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « {Prix récupération \| Prix livraison} : nombre positif ou nul attendu » · 404 « Pays non trouvé » · 400 « Un tarif de service existe déjà pour ce pays » · 500.
 
-> ⚠️ Un `null` passe le contrôle (seul `undefined` est refusé) puis échoue en base → 500.
+> Un `null` passe les deux contrôles (seul `undefined` est refusé, `erreurNombres` ignore `null`) puis est refusé par le modèle (`allowNull: false`) → **500** « Erreur serveur » (au lieu d’un 400).
 
-**Admin :** `serviceRatesApi.create({ countryId, prixRecuperation, prixLivraison })` (`src/api/countries.ts:57`), formulaire en deux étapes, libellés « Prix (€) ».
+**Admin :** `serviceRatesApi.create({ countryId, prixRecuperation, prixLivraison })` (`src/api/countries.ts:62`, appelée par `CountriesPage.tsx:297`), formulaire en deux étapes, libellés « Prix (€) ».
 
 #### `PUT /nanei/admin/service-rates/:id`
 
-> Valeurs numériques contrôlées par le back : poids ≥ 0, prix > 0, poids max. > poids min. ; sinon 400 avec le champ en cause. L’admin accepte la virgule (« 4,75 ») : avant, `parseFloat` coupait à la virgule et enregistrait 4.
+> Mêmes contrôles numériques que la création, sur les champs envoyés.
 
 **Corps :** `prixRecuperation`, `prixLivraison` (facultatifs). **`countryId` est ignoré.**
 
 **Réponse 200 :** `{ "success": true, "message": "Tarif mis à jour", "data": { …serviceRate } }`.
 
-**Erreurs :** 400 « Tarif service non trouvé » (⚠️ 400, pas 404) · 500.
+**Erreurs :** 404 « Tarif service non trouvé » · 400 « … : nombre positif ou nul attendu » · 500.
 
-**Admin :** `serviceRatesApi.update(id, { countryId, prixRecuperation, prixLivraison })` (`src/api/countries.ts:58`) ; `countryId` est envoyé mais la liste Pays est désactivée en édition.
+**Admin :** `serviceRatesApi.update(id, { countryId, prixRecuperation, prixLivraison })` (`src/api/countries.ts:63`, appelée par `CountriesPage.tsx:297`) ; `countryId` est envoyé mais ignoré (liste Pays désactivée en édition).
 
 #### `DELETE /nanei/admin/service-rates/:id`
 
@@ -1240,7 +1274,7 @@ Aucun filtre, pas de pagination. Tri par `createdAt` croissant.
 
 > Effet : le pays retombe sur l’ancienne table `service_prices`.
 
-**Admin :** `serviceRatesApi.delete(id)` (`src/api/countries.ts:59`).
+**Admin :** `serviceRatesApi.delete(id)` (`src/api/countries.ts:64`, appelée par `CountriesPage.tsx:317`).
 
 ---
 
@@ -1258,13 +1292,13 @@ Aucun filtre, pas de pagination. Tri par `createdAt` croissant.
 
 #### `GET /nanei/admin/service-prices`
 
-**Query :** `countryId`, `serviceType` (facultatifs). **Réponse 200 :** `{ "message": "Prix de services récupérés avec succès", "data": [ … ] }`. **Erreurs :** 400 « Erreur lors de la récupération des prix de services » · 500.
+**Query :** `countryId`, `serviceType` (facultatifs) ; pagination facultative `page`, `limit`. Tri : pays, `serviceType`. **Réponse 200 :** `{ "message": "Prix de services récupérés avec succès", "data": [ … ] }` (+ `pagination`). **Erreurs :** 500 « Erreur lors de la récupération des prix de services » (exception base) · 500.
 
-**Admin :** `servicePricesApi.list()` existe (`src/api/countries.ts:39`), jamais appelée.
+**Admin :** `servicePricesApi.list()` (`src/api/countries.ts:44`), appelée **sans paramètre** par `CountriesPage.tsx:339` (lecture seule : avertissement des pays en repli, V27).
 
 #### `GET /nanei/admin/service-prices/:id`
 
-**Réponse 200 :** `{ "message": "Prix de service récupéré avec succès", "data": { … } }`. **Erreurs :** 404 « Prix de service non trouvé » · 404 « Erreur lors de la récupération du prix » · 500.
+**Réponse 200 :** `{ "message": "Prix de service récupéré avec succès", "data": { … } }`. **Erreurs :** 404 « Prix de service non trouvé » · 500 « Erreur lors de la récupération du prix » (exception base) · 500.
 
 **Admin :** non appelée par l’admin.
 
@@ -1274,23 +1308,23 @@ Aucun filtre, pas de pagination. Tri par `createdAt` croissant.
 |---|---|---|---|
 | `serviceType` | string | **oui** | `récupération` ou `livraison` |
 | `countryId` | UUID | **oui** | pays existant ; un seul prix par pays + service |
-| `price` | number (EUR) | **oui** | — |
+| `price` | number (EUR) | **oui** | ≥ 0 (`utils/validationNombres.js`) |
 
-**Réponse 201 :** `{ success: true, message: "Prix de service créé avec succès", data }`. **Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « Type de service invalide. Doit être "récupération" ou "livraison" » · 400 « Pays non trouvé » · 400 « Un prix pour ce service et ce pays existe déjà » · 400 « Erreur lors de la création du prix » · 500.
+**Réponse 201 :** `{ success: true, message: "Prix de service créé avec succès", data }`. **Erreurs :** 400 « Tous les champs sont obligatoires » · 400 « Type de service invalide. Doit être "récupération" ou "livraison" » · 400 « Prix : nombre positif ou nul attendu » · 404 « Pays non trouvé » · 400 « Un prix pour ce service et ce pays existe déjà » · 500 « Erreur lors de la création du prix » (exception base) · 500.
 
-**Admin :** `servicePricesApi.create()` existe (`src/api/countries.ts:40`), jamais appelée.
+**Admin :** `servicePricesApi.create()` existe (`src/api/countries.ts:45`), jamais appelée.
 
 #### `PUT /nanei/admin/service-prices/:id`
 
-Mêmes champs, facultatifs. Pas de contrôle de doublon en mise à jour. **Réponse 200 :** `{ success: true, message: "Prix mis à jour avec succès", data }`. **Erreurs :** 400 « Prix de service non trouvé » · 400 « Pays non trouvé » · 400 « Type de service invalide » · 400 « Erreur lors de la mise à jour du prix » · 500.
+Mêmes champs, facultatifs. Pas de contrôle de doublon en mise à jour. **Réponse 200 :** `{ success: true, message: "Prix mis à jour avec succès", data }`. **Erreurs :** 404 « Prix de service non trouvé » · 404 « Pays non trouvé » · 400 « Type de service invalide » · 400 « Prix : nombre positif ou nul attendu » · 500 « Erreur lors de la mise à jour du prix » (exception base) · 500.
 
-**Admin :** `servicePricesApi.update()` existe (`src/api/countries.ts:42`), jamais appelée.
+**Admin :** `servicePricesApi.update()` existe (`src/api/countries.ts:47`), jamais appelée.
 
 #### `DELETE /nanei/admin/service-prices/:id`
 
-**Réponse 200 :** `{ success: true, message: "Prix supprimé avec succès" }`. **Erreurs :** 404 « Prix de service non trouvé » · 404 « Erreur lors de la suppression du prix » · 500.
+**Réponse 200 :** `{ success: true, message: "Prix supprimé avec succès" }`. **Erreurs :** 404 « Prix de service non trouvé » · 500 « Erreur lors de la suppression du prix » (exception base) · 500.
 
-**Admin :** `servicePricesApi.delete()` existe (`src/api/countries.ts:44`), jamais appelée.
+**Admin :** `servicePricesApi.delete()` existe (`src/api/countries.ts:49`), jamais appelée.
 
 ---
 
@@ -1315,11 +1349,11 @@ Pas de POST ni de DELETE : une seule ligne, créée par la migration `2026072209
 
 #### `GET /nanei/admin/taux-change`
 
-**Réponse 200 :** `{ "data": [ { "id": "…", "devise_source": "EUR", "devise_cible": "FCFA", "valeur": 655.957, "createdAt": "…", "updatedAt": "…" } ] }`. Tri par `createdAt`.
+**Réponse 200 :** `{ "data": [ { "id": "…", "devise_source": "EUR", "devise_cible": "FCFA", "valeur": 655.957, "createdAt": "…", "updatedAt": "…" } ] }` (pas de clé `success` ; + `pagination` si `page` / `limit`, `paginerReponse('data')`). Tri par `createdAt` croissant.
 
-**Erreurs :** 500 `{ message: "Erreur serveur", error }`.
+**Erreurs :** 500 `{ message: "Erreur serveur" }`.
 
-**Admin :** `tauxChangeApi.list()` (`src/api/countries.ts:73`), onglet « Taux de change » de `CountriesPage`. Affiche « 1 EUR = 655,957 FCFA ».
+**Admin :** `tauxChangeApi.list(params)` (`src/api/countries.ts:78`), onglet « Taux de change » de `CountriesPage.tsx:360` (`page`, `limit`) et `PaiementsPage.tsx:175` (sans paramètre : conversion FCFA). Affiche « 1 EUR = 655,957 FCFA ».
 
 #### `GET /nanei/admin/taux-change/:id`
 
@@ -1329,19 +1363,19 @@ Pas de POST ni de DELETE : une seule ligne, créée par la migration `2026072209
 
 #### `PUT /nanei/admin/taux-change/:id`
 
-> L’admin accepte la virgule (« 655,957 ») : avant, `parseFloat` enregistrait 655. Ce taux fixe le montant débité chez Wave / Orange Money.
+> L’admin convertit la virgule (« 655,957 ») avant l’envoi. Ce taux fixe le montant débité chez Wave / Orange Money.
 
 | Champ | Type | Obligatoire | Contraintes |
 |---|---|---|---|
-| `valeur` | number | **oui** | nombre strictement positif (nombre de FCFA pour 1 EUR) ; chaîne numérique acceptée |
+| `valeur` | number | **oui** | nombre fini strictement positif (nombre de FCFA pour 1 EUR) ; chaîne numérique non vide acceptée ; booléen, `""`, « 655,957 », `Infinity` refusés |
 
-Seul `valeur` est modifiable.
+Seul `valeur` est modifiable (les autres champs sont ignorés).
 
 **Réponse 200 :** `{ "success": true, "message": "Taux de change mis à jour", "data": { …tauxChange } }`.
 
-**Erreurs :** 400 « Taux de change non trouvé » (⚠️ 400, pas 404) · 400 « La valeur du taux doit être un nombre positif » · 500.
+**Erreurs :** 404 « Taux de change non trouvé » · 400 « La valeur du taux doit être un nombre positif » · 500.
 
-**Admin :** `tauxChangeApi.update(id, valeur)` (`src/api/countries.ts:74`) avec `{ valeur: parseFloat(saisie) }`, modale « Modifier le taux de change ».
+**Admin :** `tauxChangeApi.update(id, valeur)` (`src/api/countries.ts:79`, appelée par `CountriesPage.tsx:370`) avec `{ valeur: nombreSaisi(saisie, 'Taux', { strict: true }) }`, modale « Modifier le taux de change ».
 
 ---
 
@@ -1362,7 +1396,7 @@ Seul `valeur` est modifiable.
 
 #### `GET /nanei/admin/paiements`
 
-Aucun filtre, **pas de pagination** (tous les paiements). Tri : plus récent d’abord.
+**Paramètres (query) :** pagination facultative `page`, `limit` ; `statut` (facultatif, une des 5 valeurs ci-dessus, sinon **400**) ; `q` (facultatif) : « contient », insensible à la casse, sur `colis.reference`, `colis.destination`, `payeur.nom`, `payeur.prenom`, `payeur.email` ou `referenceTransaction`. Tri : plus récent d’abord. Avec `page` / `limit`, la réponse contient en plus `pagination`.
 
 **Réponse 200 :**
 ```json
@@ -1377,9 +1411,9 @@ Aucun filtre, **pas de pagination** (tous les paiements). Tri : plus récent d�
 } ] }
 ```
 
-**Erreurs :** 500 `{ success: false, message: "Erreur serveur", error }`.
+**Erreurs :** 400 « Statut invalide. Valeurs: en_attente, en_cours, paye, echoue, rembourse » · 500 `{ success: false, message: "Erreur serveur" }`.
 
-**Admin :** `paiementsApi.list()` (`src/api/paiements.ts:45`), `PaiementsPage`. Recherche (référence, nom, destination) et filtre par statut faits **côté navigateur**. Affiche `prixTotal` et `montantPaye` **en euros**, avec en dessous l’équivalent FCFA au taux de change actuel (`GET /admin/taux-change`, couple EUR → FCFA).
+**Admin :** `paiementsApi.list({ page, limit, q, statut })` (`src/api/paiements.ts:48`), appelée par `PaiementsPage.tsx:152`. Recherche et filtre par statut faits **côté serveur** (`statut` omis pour « tous »). Affiche `prixTotal` et `montantPaye` **en euros**, avec en dessous l’équivalent FCFA au taux de change actuel (`GET /admin/taux-change`, couple EUR → FCFA).
 
 #### `GET /nanei/admin/paiements/stats`
 
@@ -1390,7 +1424,7 @@ Aucun filtre, **pas de pagination** (tous les paiements). Tri : plus récent d�
 
 **Erreurs :** 500.
 
-**Admin :** `paiementsApi.stats()` (`src/api/paiements.ts:46`). Cartes « Total », « Payés », « En attente » (= `enAttente + enCours`), « Montant encaissé » (en euros, avec l’équivalent FCFA au taux actuel).
+**Admin :** `paiementsApi.stats()` (`src/api/paiements.ts:50`, appelée par `PaiementsPage.tsx:168`). Cartes « Total », « Payés », « En attente » (= `enAttente + enCours`), « Montant encaissé » (en euros, avec l’équivalent FCFA au taux actuel).
 
 #### `PUT /nanei/admin/paiements/:id/statut`
 
@@ -1402,11 +1436,11 @@ Aucune règle de transition (on peut passer de `paye` à `en_attente`). Passage 
 
 **Réponse 200 :** `{ "success": true, "message": "Statut mis à jour", "data": { …paiement } }`.
 
-**Erreurs :** 400 « Statut invalide. Valeurs: en_attente, en_cours, paye, echoue, rembourse » · 400 « Paiement non trouvé » (⚠️ 400, pas 404) · 500.
+**Erreurs :** 400 « Statut invalide. Valeurs: en_attente, en_cours, paye, echoue, rembourse » · 404 « Paiement non trouvé » · 500.
 
 > Un paiement passé à `paye` à la main est donc compté dans `montantTotal` et dans le CA du rapport mensuel.
 
-**Admin :** `paiementsApi.changerStatut(id, statut)` (`src/api/paiements.ts:47`), menu déroulant de statut avec confirmation.
+**Admin :** `paiementsApi.changerStatut(id, statut)` (`src/api/paiements.ts:51`, appelée par `PaiementsPage.tsx:61`), menu déroulant de statut avec confirmation.
 
 ---
 
@@ -1435,17 +1469,17 @@ Pas de corps. Génère (ou **écrase**) le rapport du mois précédent.
 
 **Erreurs :** 500 `{ success: false, message: "Erreur lors de la génération du rapport" }`.
 
-**Admin :** `rapportsApi.generate()` (`src/api/rapports.ts`, délai 120 s), bouton « Générer » de `RapportsPage`. N’utilise pas le contenu de la réponse (simple notification).
+**Admin :** `rapportsApi.generate()` (`src/api/rapports.ts:16`, délai 120 s), bouton « Générer » de `RapportsPage.tsx:33`. N’utilise pas le contenu de la réponse (simple notification).
 
 #### `GET /nanei/admin/rapports`
 
-Liste des fichiers `.pdf` du dossier, tri par nom **décroissant** (le plus récent d’abord). Pas de pagination.
+Liste des fichiers `.pdf` du dossier, tri par nom **décroissant** (le plus récent d’abord). Pagination facultative `page`, `limit` (`paginerReponse('rapports')`).
 
-**Réponse 200 :** `{ "success": true, "rapports": [ { "filename": "rapport-2026-09.pdf", "mois": "septembre", "annee": "2026", "label": "Septembre 2026", "url": "/nanei/admin/rapports/rapport-2026-09.pdf", "taille": 48213 } ] }` (`taille` en octets ; `url` = route protégée). Aucun rapport → `rapports: []`.
+**Réponse 200 :** `{ "success": true, "rapports": [ { "filename": "rapport-2026-09.pdf", "mois": "septembre", "annee": "2026", "label": "Septembre 2026", "url": "/nanei/admin/rapports/rapport-2026-09.pdf", "taille": 48213 } ] }` (`taille` en octets ; `url` = route protégée, nom encodé par `encodeURIComponent` ; + `pagination`). Aucun rapport → `rapports: []`. Un fichier qui ne suit pas le motif `rapport-AAAA-MM.pdf` a `mois: null`, `annee: null`, `label` = nom du fichier.
 
 **Erreurs :** 500 `{ success: false, message: "Erreur serveur" }`.
 
-**Admin :** `rapportsApi.list()` (`src/api/rapports.ts:5`). Lit `res.data.data ?? res.data.rapports`. Affiche `rapport.label` (« Septembre 2026 »).
+**Admin :** `rapportsApi.list({ page, limit })` (`src/api/rapports.ts:7`, appelée par `RapportsPage.tsx:24`). Lit `rapports` (repli sur `data`, clé que le back ne renvoie pas) et `pagination`. Affiche `rapport.label` (« Septembre 2026 »).
 
 #### `GET /nanei/admin/rapports/:filename`
 
@@ -1454,7 +1488,7 @@ Liste des fichiers `.pdf` du dossier, tri par nom **décroissant** (le plus réc
 
 **Erreurs :** 400 « Nom de fichier invalide » · 404 « Fichier introuvable » · 500 « Erreur serveur » (JSON).
 
-**Admin :** `rapportsApi.download(filename)` (`src/api/rapports.ts:6`) avec `responseType: 'blob'`, puis enregistrement local du fichier.
+**Admin :** `rapportsApi.download(filename)` (`src/api/rapports.ts:13`, nom encodé, `responseType: 'blob'`, délai par défaut 15 s), appelée par `RapportsPage.tsx:49`, puis enregistrement local du fichier ; une erreur affiche le message JSON relu dans le blob.
 
 > L’ancienne adresse publique `GET /uploads/rapports/<filename>` répond toujours **404** (garde dans `app.js`) : un rapport ne se télécharge qu’avec un jeton admin.
 
@@ -1472,12 +1506,12 @@ Il n’existe **pas** de route dédiée « dashboard » ou « statistiques globa
 | En attente | `GET /nanei/admin/nombre-colis-en-attente` | idem | `{ …, nombre_colis }` |
 | Récupérés | `GET /nanei/admin/nombre-colis-recuperes` | idem | `{ …, nombre_colis }` |
 | Livrés | `GET /nanei/admin/nombre-colis-livres` | idem | `{ …, nombre_colis }` |
-| Colis bloqués (> 3 jours en attente) | `GET /nanei/admin/colis-en-attente` | `colis ?? data` | `{ success, message, colis: [...] }` — filtre 3 jours fait **côté navigateur** |
-| 8 derniers colis | `GET /nanei/admin/liste-colis` | `colis ?? data` | `{ success, message, colis: [...] }` — **tous** les colis sont chargés puis coupés à 8 côté navigateur |
+| Colis bloqués (> 3 jours en attente) | `GET /nanei/admin/colis-en-attente` (sans pagination) | `colis` | `{ success, message, colis: [...] }` — filtre 3 jours fait **côté navigateur** |
+| 8 derniers colis | `GET /nanei/admin/liste-colis?page=1&limit=8` | `colis` | `{ success, message, colis: [...], pagination }` — 8 colis seulement |
 
-**Admin :** `clientsApi.count()`, `adminsApi.count()`, `colisApi.count()`, `colisApi.countEnAttente()`, `colisApi.countRecuperes()`, `colisApi.countLivres()`, `colisApi.enAttente()`, `colisApi.list()`. Les clés lues correspondent bien au back (grâce aux replis `??`). Le prix des colis y est affiché en € (`formatPrice(c.prix)`), ce qui est correct.
+**Admin :** `clientsApi.count()`, `adminsApi.count()`, `colisApi.count()`, `colisApi.countEnAttente()`, `colisApi.countRecuperes()`, `colisApi.countLivres()` (`DashboardPage.tsx:58-63`), `colisApi.enAttente()` (`:69`), `colisApi.list({ page: 1, limit: 8 })` (`:81`). Les clés lues correspondent bien au back (grâce aux replis `??`). Le prix des colis y est affiché en € (`formatPrice(c.prix)`), ce qui est correct.
 
-Autres routes de statistiques existantes, **non utilisées** par le tableau de bord : `GET /nanei/admin/paiements/stats` (utilisée par `PaiementsPage` seulement), `GET /nanei/admin/messages/stats`, `GET /nanei/messages/stats`.
+Autres routes de statistiques existantes, **non utilisées** par le tableau de bord : `GET /nanei/admin/paiements/stats` (utilisée par `PaiementsPage` seulement), `GET /nanei/admin/messages/stats` (utilisée nulle part). L’ancien doublon `GET /nanei/messages/stats` a été retiré (B.6, P2).
 
 
 ---
@@ -1496,7 +1530,7 @@ Source : `nanei/src/models/colis.model.js:65-72` · `admin-nanei/src/types/index
 
 ### Type de transport (`colis.type_transport`)
 
-`aerien` | `maritime` (sans accent), ou `null`. Lecture normalisée : `type_transport`, sinon `type_colis`, sinon `aerien` (`nanei/src/utils/typeTransport.js`). **Absent du type `Colis` admin** (`admin-nanei/src/types/index.ts:14-27`) et jamais affiché.
+`aerien` | `maritime` (sans accent), ou `null`. Lecture normalisée : `type_transport`, sinon `type_colis`, sinon `aerien` (`nanei/src/utils/typeTransport.js`). Typé dans `Colis` admin (`admin-nanei/src/types/index.ts:24`, `'aerien' | 'maritime' | null`) et affiché dans le tableau des colis (B8).
 
 ### Statut de réclamation
 
@@ -1514,11 +1548,11 @@ Source : `nanei/src/models/reclamation.model.js:33-37` · `admin-nanei/src/types
 | Code back | Code admin | Libellé admin |
 |---|---|---|
 | `perdu` | `perdu` | Colis perdu |
-| `endommagé` (avec accent ; `endommage` accepté à la création et converti) | `endommage` (sans accent) | Colis endommagé |
+| `endommagé` (avec accent ; `endommage` accepté à la création et converti) | `endommagé` (avec accent ; `endommage` relu et converti par `api/reclamations.ts:29`) | Colis endommagé |
 | `retard` | `retard` | Retard de livraison |
 | `autre` | `autre` | Autre |
 
-Source : `nanei/src/models/reclamation.model.js:20-23`, `controllers/client/reclamation.controller.js:18-24` · `admin-nanei/src/types/index.ts:89`, `ReclamationsPage.tsx:19-24`. **Désaccord** sur `endommagé` (voir Annexe B).
+Source : `nanei/src/models/reclamation.model.js:20-23`, `controllers/client/reclamation.controller.js:18-24` · `admin-nanei/src/types/index.ts:96`, `ReclamationsPage.tsx:26`. Alignés depuis la correction B6.
 
 ### Statut de paiement (export)
 
@@ -1791,3 +1825,51 @@ Correctifs complémentaires :
 - `GET /admin/audit-logs` : filtre `action` en correspondance partielle et sans casse (`update` trouve `UPDATE_STATUT`).
 - `POST /admin/ajouter-admin` : nom et prénom de 2 à 50 caractères, format du téléphone contrôlé (mêmes règles qu’à l’inscription).
 - Les bugs trouvés par les suites de tests sont corrigés et couverts par un test (détail dans les rapports de chaque projet).
+
+### B.8 Relecture complète du contrat (2026-10-12)
+
+**Routes :** 78 routes montées dans le périmètre (72 sous `/nanei/admin`, 3 sous `/nanei/auth`, 3 sous `/nanei/account`), relevées dans `app.js` et les 21 fichiers de routes concernés ; **78 documentées avant et après** (aucune route manquante, aucune route documentée inexistante). Le sommaire annonçait 6 routes en §3 au lieu de 5 (corrigé). Routes `/auth` et `/account` montées mais non appelées par l’admin : `POST /auth/register`, `POST /auth/oublier-password`, `POST /auth/reset-password`, `POST /account/fcm-token`, `DELETE /account` (signalées sous la table du §1, hors périmètre). Aucune route admin sans `auth` + `isAdmin`, hors `forgot-password` / `reset-password` admin (publiques, voulues). Aucun schéma Joi sur `/nanei/admin/*`.
+
+**Sections corrigées (le contrat décrivait l’état d’avant B.6 / B.7) :**
+
+| Route(s) | Ce qui était faux |
+|---|---|
+| §0 Erreurs 500 | `error` / détail technique annoncés dans le corps : retirés par le filtre global (`reponsesErreur.middleware.js`) ; ajout de la règle `statutEchec` (404 / 500) et des erreurs multer |
+| `POST /auth/refresh` (table §1) | limite annoncée 5 / 15 min au lieu de 30 / 15 min |
+| `POST /auth/logout` | l’admin envoie désormais le vrai refresh token (`DashboardLayout.tsx:116`), plus `""` |
+| `PUT /account/modifier-profil` | `telephone: ""` n’est plus ignoré (retiré pour un admin, 400 pour un client) ; champ fichier `photoProfil` et ses erreurs absents |
+| `GET /admin/liste-admins` | « pas de pagination ni de filtre » : pagination et `q` existent |
+| `POST /admin/ajouter-admin` | mot de passe « 8 car. sans autre règle », nom / prénom / adresse « requis par le modèle » : règles réelles (mot de passe complet, nom / prénom 2–50, téléphone formaté, adresse facultative) et 4 messages d’erreur manquants ; « Erreur lors de la création de l'admin » est un 500, pas un 400 |
+| `GET /admin/audit-logs` | `action` en égalité exacte → « contient », insensible à la casse ; clé `pagination` et action `EXPORT` absentes |
+| `GET /admin/messages` | pagination et `q` absentes ; doublons `/nanei/messages` annoncés alors qu’ils sont retirés |
+| `GET /admin/liste-colis`, `colis-en-attente`, `colis-livres`, `colis-recuperes` | pagination, `q` et `taille_lot` absents ; messages de réponse différents selon la liste |
+| `PUT /admin/changer-statut-*` | « aucun contrôle de transition » : transitions contrôlées, 409 avec 3 messages |
+| `GET /admin/etiquettes/:colisId` | pays expéditeur « toujours MALI » : déduit du téléphone |
+| `POST /admin/colis/:colisId/preuve` | « pas de contrôle du statut » : 409 si le colis n’est pas `livre` ; `updatedAt` annoncé dans la réponse 201 (le modèle n’en a pas) ; contrôle par signature absent |
+| `GET /admin/avis`, `GET /admin/reclamations` | pagination absente ; `statut` invalide des réclamations → 400 (et non 500) |
+| `GET /admin/countries` et `/:id`, `POST`, `PUT` | pagination absente ; erreurs base → 500 (et non 400 / 404) ; « Pays non trouvé » du PUT → 404 (et non 400) ; message 409 du DELETE construit dynamiquement |
+| `POST` / `PUT /admin/shipping-rates` | « aucun contrôle de signe » : poids ≥ 0, max > 0, prix > 0 ; `countryId` du PUT **ignoré** (et non « modifiable sans contrôle ») ; contrôle min < max sur les valeurs finales ; « Pays non trouvé » / « Tarif non trouvé » → 404 |
+| `/admin/shipping-prices*` | contrôles numériques et validation du `type` en PUT absents ; codes (404 / 500) ; `list()` est **appelée** par l’admin (avertissement V27) |
+| `/admin/service-rates*` | note « prix > 0 » fausse : prix **≥ 0** ; « Tarif service non trouvé » du PUT → 404 ; pagination |
+| `/admin/service-prices*` | contrôle `price ≥ 0` absent ; codes (404 / 500) ; `list()` est appelée par l’admin |
+| `GET` / `PUT /admin/taux-change` | pagination ; « non trouvé » → 404 |
+| `GET /admin/paiements`, `PUT /:id/statut` | filtres `statut` / `q` et pagination côté serveur (annoncés « côté navigateur ») ; 400 sur `statut` invalide ; « Paiement non trouvé » → 404 |
+| `GET /admin/rapports` | pagination absente |
+| §17.2 Tableau de bord | « tous les colis chargés » : `liste-colis?page=1&limit=8` ; `GET /nanei/messages/stats` n’existe plus |
+| Annexe A | `type_transport` « absent du type admin » et désaccord `endommagé` : corrigés côté admin depuis B6 / B8 |
+| Lignes « Admin : » | numéros de ligne de `src/api/*.ts` et des écrans remis à jour |
+
+**Écarts admin ↔ back restants (aucun bloquant) :**
+
+| # | Côté admin | Écart | Effet |
+|---|---|---|---|
+| R1 | `src/api/auth.ts:16`, `features/profile/ProfilePage.tsx:46` | repli sur `res.data.user` : le back ne renvoie que `utilisateur` | aucun (code mort) |
+| R2 | `features/audit/AuditLogPage.tsx:60-61` | commentaire « le back compare l’action à l’identique » faux : le back fait un `ILIKE` partiel ; `toUpperCase()` devenu inutile | aucun |
+| R3 | `src/api/rapports.ts:8`, `features/rapports/RapportsPage.tsx:25` ; `src/api/avis.ts:18, 23, 57, 63` ; `src/api/reclamations.ts:60, 64` ; `src/api/preuveLivraison.ts:12-14` | replis sur des clés que le back ne renvoie pas (`data`, `moyenne`) | aucun (code mort) |
+| R4 | `src/api/countries.ts:39`, `features/countries/CountriesPage.tsx:214` ; `src/api/countries.ts:63`, `CountriesPage.tsx:293` | `countryId` envoyé à `PUT shipping-rates/:id` et `PUT service-rates/:id`, ignoré par le back | aucun (liste Pays désactivée en édition) |
+| R5 | `src/api/admins.ts:17`, `src/api/clients.ts:14`, `src/api/colis.ts:20`, `src/api/messages.ts:17`, `src/api/countries.ts:11`, `:21-25`, `:45-49` | fonctions définies mais jamais appelées (`search`, `stats`, `getById`, écritures des anciennes grilles) | aucun ; contrats exacts |
+| R6 | `features/auth/ResetPasswordPage.tsx:15-18` vs `src/api/admins.ts:19` | politique de mot de passe différente : la réinitialisation admin exige un caractère spécial `!@#$%^&*`, la création d’admin non (A14, côté back) | incohérence fonctionnelle déjà connue |
+| R7 | `src/api/rapports.ts:14` | téléchargement d’un rapport avec le délai par défaut de 15 s | ⚠️ À vérifier sur un gros PDF / connexion lente |
+| R8 | `src/api/messages.ts:5-11` | type `MessageClient` sans `updatedAt` (renvoyé par le back) | aucun |
+
+Aucun appel de l’admin ne vise une route inexistante, et aucun champ envoyé n’est inconnu du back (hors R4).

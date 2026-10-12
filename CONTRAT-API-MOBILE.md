@@ -1,5 +1,7 @@
 # Contrat d’API — Application mobile Nanei / Franco Mali Ship (envoi et suivi de colis)
 
+> **Mis à jour le 2026-10-12 : relecture complète** des 43 routes montées hors `/nanei/admin` (hors webhooks) et des 42 routes appelées par l’application (`C:\nanei\lib`). Aucune route manquante ; corrections : pagination et filtres (§5, §6, §7, §10, §11, §12), champs de réponse (`webhookPayload` retiré, `updatedAt` absent des avis et preuves), téléphone vidé au profil, erreurs 500 sans `erreur` / `error`, inscription sans adresse, contacts (`pays_id`). Nouveaux écarts : Annexe C.6.
+
 > Rédigé le 2026-10-11 **à partir du code du back**, mis à jour après les deux séries de correctifs du même jour (voir Annexe C) (`nanei/src` : `app.js`, routes, middlewares, schémas Joi, contrôleurs, services, modèles Sequelize). Il ne s’agit **pas** d’exemples capturés sur une API réelle : les formes de réponse sont déduites du code. Les points marqués **⚠️ À vérifier** n’ont pas pu être confirmés par lecture seule.
 >
 > **Périmètre :** les routes appelées par l’application mobile Flutter (`C:\nanei`) : authentification, compte, colis (envoi, lots, listes, recherche), pays et tarifs, notifications, paiements et factures, étiquettes, suivi public, réclamations, contacts favoris, preuve de livraison, avis, message au support. Le back-office (`/nanei/admin/*`) et les webhooks des fournisseurs de paiement (`/nanei/paiements/webhook/*`) sont hors périmètre : ils ne sont jamais appelés par l’application.
@@ -10,7 +12,7 @@
 2. Pour chaque route, comparer avec le code mobile : chemin exact, méthode, corps (noms de champs **exacts**, casse comprise), clés lues dans la réponse.
 3. Les noms de champs **mélangent camelCase et snake_case** selon les routes (`recepteurId`, `type_colis`, `colis_id`, `moyenPaiement`…). Ne pas « corriger » un nom : utiliser celui indiqué.
 4. Les statuts sont des **codes sans accent** : `en_attente`, `recupere`, `livre`. L’application ne doit jamais comparer avec `livré`.
-5. La section **Annexe C — Écarts constatés** liste les correctifs déjà appliqués (C.1, C.2), les incohérences restantes du back (C.3), les risques de sécurité (C.4) et les étapes de déploiement (C.5).
+5. La section **Annexe C — Écarts constatés** liste les correctifs déjà appliqués (C.1, C.2, C.4 bis à C.4 quinquies), les incohérences du back (C.3), les risques de sécurité (C.4), les étapes de déploiement (C.5) et les écarts mobile ↔ back relevés à la relecture du 2026-10-12 (C.6).
 
 ## Sommaire
 
@@ -21,7 +23,7 @@
 - [3. Pays, tarifs et taux de change](#3-pays-tarifs-et-taux-de-change) — 4 routes
 - [4. Colis — envoi](#4-colis--envoi) — 3 routes
 - [5. Colis — consultation](#5-colis--consultation) — 4 routes
-- [6. Notifications](#6-notifications) — 2 routes
+- [6. Notifications](#6-notifications) — 3 routes
 - [7. Paiements et factures](#7-paiements-et-factures) — 5 routes
 - [8. Étiquette et suivi public](#8-étiquette-et-suivi-public) — 2 routes
 - [9. Preuve de livraison](#9-preuve-de-livraison) — 1 route
@@ -53,7 +55,7 @@ Il n’y a **pas d’enveloppe commune**. On rencontre, selon la route :
 |---|---|
 | `{ token, refreshToken, utilisateur }` | `POST /auth/login` |
 | `{ message, utilisateur }` | inscription, profil |
-| `{ data: … }` (sans `success`) | listes et recherche de colis, notifications, recherche de client |
+| `{ data: … }` (sans `success`) | listes et recherche de colis (+ `par_statut`), notifications (+ `non_lues`), recherche de client — `pagination` en plus si demandée |
 | `{ success, data }` | pays, tarifs, statistiques, paiements, calcul de prix, taux de change |
 | `{ success, message, <entité> }` | réclamations (`reclamation(s)`), contacts (`contact(s)`), avis (`avis`), preuve (`preuve`) |
 | `{ message }` | la plupart des erreurs et des actions simples |
@@ -77,9 +79,11 @@ Il n’y a **pas d’enveloppe commune**. On rencontre, selon la route :
 | 409 | Doublon (avis déjà donné) | `{ "success": false, "message": "…" }` |
 | 429 | Limite de débit dépassée | `{ "message": "Trop de …" }` (en-têtes standard `RateLimit-*`) |
 | 500 | Erreur interne | `{ "message": "Erreur serveur…" }` ou `{ "success": false, "message": "Erreur serveur" }` — les champs `error` / `erreur` et tout détail technique (SQL, pile) sont **retirés** de toute réponse ≥ 500 (`middlewares/reponsesErreur.middleware.js`) |
-| 400 | Fichier refusé à l’upload (type non autorisé, trop de fichiers) | `{ "success": false, "message": "Type de fichier non autorisé", "error": "…" }` |
-| 413 | Fichier trop volumineux | `{ "success": false, "message": "Fichier trop volumineux", "error": "…" }` |
-| 500 | Erreur non interceptée | `{ "success": false, "message": "Erreur interne du serveur", "error": "Erreur interne du serveur" }` |
+| 400 | Fichier refusé à l’upload | type déclaré refusé : `{ "success": false, "message": "Type de fichier non autorisé", "error": "Type de fichier non autorisé" }` · trop de fichiers ou champ inattendu : `{ "success": false, "message": "Trop de fichiers ou champ de fichier inattendu", "error": "…" }` |
+| 413 | Fichier trop volumineux | `{ "success": false, "message": "Fichier trop volumineux", "error": "Fichier trop volumineux" }` |
+| 500 | Erreur non interceptée | `{ "success": false, "message": "Erreur interne du serveur" }` (le champ `error` est retiré par le filtre des réponses ≥ 500) |
+
+> Filtre global (`middlewares/reponsesErreur.middleware.js`) : sur une réponse **4xx**, un `message` qui ressemble à une erreur technique (SQL, Sequelize, pile, `undefined`…) est remplacé par « Requête invalide » ; sur une **5xx**, par « Erreur serveur ». Les champs `error` / `erreur` sont toujours retirés des 5xx.
 
 > Il n’existe **pas** de champ `error.code` stable : brancher la logique de l’application sur le **code HTTP**, pas sur le texte.
 
@@ -196,7 +200,7 @@ Crée un compte `Particulier`. Si un compte **destinataire léger** (statut `ina
 | `email` | string (email) | **oui** | mis en minuscules |
 | `mot_de_passe` | string | **oui** | 8 à 128 car., au moins 1 minuscule, 1 majuscule, 1 chiffre |
 | `telephone` | string | **oui en pratique** | Joi le dit facultatif, mais le service répond 400 « Le numéro de téléphone est obligatoire » s’il manque. Format `/^\+?[0-9\s\-\.]{7,20}$/` |
-| `adresse` | string | **oui en pratique** | max 200 car. ; `""` accepté. ⚠️ La colonne est `NOT NULL` : si le champ est **absent**, l’insertion échoue → 500 |
+| `adresse` | string | non | max 200 car. ; `""` accepté. Absent → enregistrée vide (`""`) |
 | `role` | string | non | seule valeur permise : `Particulier` (défaut) |
 
 ```json
@@ -222,7 +226,9 @@ Crée un compte `Particulier`. Si un compte **destinataire léger** (statut `ina
 }
 ```
 
-**Erreurs :** 400 `Données invalides` (+ `details`) · 400 « Cet email est déjà utilisé » · 400 « Ce numéro de téléphone est déjà utilisé » · 500 `{ message, erreur }`.
+**Erreurs :** 400 `Données invalides` (+ `details`) · 400 « Le numéro de téléphone est obligatoire » · 400 « Cet email est déjà utilisé » · 400 « Ce numéro de téléphone est déjà utilisé » · 500 `{ message: "Erreur serveur lors de l'inscription" }` (le champ `erreur` est retiré par le filtre des 5xx).
+
+> Seul un compte destinataire **créé automatiquement** (`compteAuto = true`, statut `inactif`) est revendiqué ; un client désactivé par un admin ne l’est jamais (son e-mail / téléphone répondent « déjà utilisé »).
 
 ---
 
@@ -267,7 +273,7 @@ Crée un compte `Particulier`. Si un compte **destinataire léger** (statut `ina
 
 **Réponse 200 :** `{ "token": "<nouveau jwt accès>", "refreshToken": "<nouveau refresh token>" }`. L’ancien refresh token est révoqué : rejouer l’ancien → 401.
 
-**Erreurs :** 400 `Données invalides` · 401 « Refresh token invalide ou révoqué » · 401 « Refresh token expiré » · 401 « Refresh token invalide » · 429 · 500.
+**Erreurs :** 400 `Données invalides` · 401 « Refresh token invalide ou révoqué » · 401 « Refresh token expiré » · 401 « Refresh token invalide » · 401 « Session expirée, veuillez vous reconnecter » (compte supprimé ou non `actif`, ou refresh token émis avant le dernier changement de mot de passe ; il est alors révoqué) · 429 « Trop de renouvellements de session. Veuillez réessayer dans quelques minutes. » · 500 « Erreur serveur ».
 
 ---
 
@@ -303,7 +309,7 @@ Envoie un code à 6 chiffres par e-mail (valide **10 minutes**).
 
 **Réponse 200 :** `{ "success": true, "message": "Mot de passe réinitialisé avec succès" }`.
 
-**Erreurs (400, `{ success: false, message }`) :** « Aucun code de réinitialisation trouvé. Veuillez refaire la demande. » (aussi pour un e-mail inconnu : pas d’énumération de comptes) · « Code expiré. Veuillez refaire la demande. » · « Code incorrect (N tentatives restantes). » · « Trop de tentatives. Réessayez dans 15 minutes. » (blocage de 15 min après 3 échecs) · `Données invalides` (+ `details`). 429 possible.
+**Erreurs (400, `{ success: false, message }`) :** « Aucun code de réinitialisation trouvé. Veuillez refaire la demande. » (aussi pour un e-mail inconnu : pas d’énumération de comptes) · « Code expiré. Veuillez refaire la demande. » · « Code incorrect (N tentatives restantes). » · « Trop de tentatives. Réessayez dans 15 minutes. » (blocage de 15 min après 3 échecs) · « Trop de tentatives. Réessayez dans N minute(s). » (nouvel essai pendant le blocage) · `Données invalides` (+ `details`). 429 possible (« Trop de tentatives… » par IP, ou « Trop de tentatives pour cet email. Réessayez dans 15 minutes. »). 500 `{ success: false, message }`.
 
 > Le message « Code incorrect » contient déjà le nombre d’essais restants : le mobile l’affiche tel quel.
 
@@ -338,13 +344,13 @@ Envoie un code à 6 chiffres par e-mail (valide **10 minutes**).
 | `nom` | string | 2 à 50 car. |
 | `prenom` | string | 2 à 50 car. |
 | `email` | string (email) | doit être libre, sinon 400 « Cet email est déjà utilisé » |
-| `telephone` | string | format téléphone, `""` accepté (ignoré) ; doit être libre, sinon 400 |
+| `telephone` | string | format téléphone ; doit être libre, sinon 400 « Ce numéro de téléphone est déjà utilisé ». `""` (champ vidé) → 400 « Le numéro de téléphone est obligatoire » pour un client qui a déjà un numéro (seul un `Admin` peut l’effacer) |
 | `adresse` | string | max 200 car. ; `""` accepté (efface l’adresse) |
 | `photoProfil` | fichier | PNG, JPEG, WEBP (ou PDF), 5 Mo max. Envoyé sur R2, l’URL est enregistrée dans `photo_profil` et renvoyée dans `utilisateur.photoProfil`. Le mobile l’envoie seule, en multipart, après un appui sur l’avatar du profil |
 
 **Réponse 200 :** `{ "message": "Profil modifié avec succès", "utilisateur": { …formatUser } }`.
 
-**Erreurs :** 400 `Données invalides` · 400 (e-mail ou téléphone déjà utilisé) · 400 « Type de fichier non autorisé » · 413 « Fichier trop volumineux » · 403 compte désactivé · 429 · 500.
+**Erreurs :** 400 `Données invalides` · 400 (e-mail ou téléphone déjà utilisé, téléphone vidé) · 400 « Type de fichier non autorisé » (type déclaré, `{ success: false, message, error }`) · 400 `{ message: "Type de fichier non autorisé (contenu non reconnu comme image PNG, JPEG, WEBP ou PDF)" }` (contenu réel vérifié) · 413 « Fichier trop volumineux » · 403 compte désactivé · 429 · 500 « Erreur serveur lors de la modification du profil ».
 
 ---
 
@@ -459,7 +465,7 @@ Pays **actifs**, triés par nom.
 }
 ```
 
-**Erreurs (400, `{ success: false, message }`) :** paramètres manquants · « Pays non trouvé » · « Aucun prix trouvé pour le pays et le type de transport spécifiés » · « Aucune plage de poids ne correspond au poids de N kg ».
+**Erreurs (400, `{ success: false, message }`) :** paramètres manquants (« Les paramètres countryId, weight et shippingType sont obligatoires », ou « … weight (> 0) … » si le poids n’est pas un nombre strictement positif) · « Erreur lors du calcul du prix total » (erreur interne du calcul, renvoyée en 400) · « Pays non trouvé » (inconnu ou inactif) · « Aucun prix trouvé pour le pays et le type de transport spécifiés » · « Aucune plage de poids ne correspond au poids de N kg ».
 
 La réponse contient aussi `data.pricePerKg`, ainsi que `breakdown.countryId`. Erreur supplémentaire : 400 « Type de transport invalide (aérien ou maritime) ».
 
@@ -491,6 +497,10 @@ Recherche d’un destinataire **inscrit et actif**, par identifiant exact.
 
 > L’envoi de colis n’utilise que `id` (`recepteurId`). Si rien n’est trouvé, le mobile propose la saisie manuelle du destinataire.
 
+Moins de 5 caractères, ou un numéro de moins de 7 chiffres → `{ "data": [] }` sans recherche. E-mail reconnu par `/^\S+@\S+\.\S+$/` (comparé en minuscules). Masquage : 2 premiers caractères de l’e-mail + `***@domaine` ; téléphone = indicatif (4 premiers caractères si le numéro commence par `+`) + `** **` + 4 derniers chiffres.
+
+**Erreurs :** 400 `{ message: "Recherche impossible pour le moment" }` (erreur interne) · 401 / 403 / 404 (jeton).
+
 ---
 
 #### `POST /nanei/client/envoie-colis`
@@ -503,13 +513,13 @@ Aucune validation Joi : les contrôles viennent du service et des contraintes de
 |---|---|---|---|
 | `recepteurId` | UUID | **oui, sauf si** `destinataireManuel` | compte client existant (jamais un administrateur), sinon 400 « Recepteur non trouvé » |
 | `destinataireManuel` | objet | **oui, sauf si** `recepteurId` | prioritaire sur `recepteurId` s’il est présent (voir ci-dessous) |
-| `poids` | number | **oui** | kg ; absent → 400 (message d’erreur Sequelize) |
+| `poids` | number | **oui** | kg, strictement positif. Avec `countryId` + `shippingType` : absent, nul ou négatif → 400 « Les paramètres countryId, weight (> 0) et shippingType sont obligatoires ». Sans eux (ancienne app) : absent → 400 avec le message de validation Sequelize (« notNull Violation: Colis.poids cannot be null ») |
 | `countryId` | UUID | **oui** (app ≥ 1.0.2+13) | pays de destination. Avec `shippingType`, déclenche le **calcul du prix par le back** |
 | `shippingType` | string | **oui** (app ≥ 1.0.2+13) | `aérien` ou `maritime` (casse et accent tolérés). Enregistré dans `colis.type_transport` (`aerien` / `maritime`) |
 | `needsPickup` | boolean | non | récupération à domicile (défaut `false`) |
 | `needsDelivery` | boolean | non | livraison à destination (défaut `false`) |
-| `prix` | number | non | **ignoré** quand `countryId` et `shippingType` sont fournis. Pris tel quel seulement pour les anciennes versions de l’app, tant que `PRIX_SERVEUR_OBLIGATOIRE` n’est pas `true` |
-| `destination` | string | non si `countryId` | remplacée par le nom du pays de `countryId` quand le prix est calculé par le back |
+| `prix` | number | non | **ignoré** quand `countryId` et `shippingType` sont fournis. Pris tel quel seulement pour les anciennes versions de l’app, tant que `PRIX_SERVEUR_OBLIGATOIRE` n’est pas `true` (doit alors être un nombre > 0, sinon 400 « Prix invalide ») |
+| `destination` | string | non si `countryId` | remplacée par le nom du pays de `countryId` quand le prix est calculé par le back. Ni `destination` ni `countryId` → 400 « La destination est obligatoire » |
 | `type_colis` | string | non | **nature** du colis, texte libre saisi par l’utilisateur (« Vêtement », « Document »…). Ce n’est **pas** le mode de transport |
 | `description` | string | non | — |
 
@@ -524,7 +534,7 @@ Aucune validation Joi : les contrôles viennent du service et des contraintes de
 | `ville` | string | non | enregistrée comme adresse du compte léger |
 | `paysId` | UUID | non | enregistré dans le contact favori |
 
-Résolution du destinataire manuel : un compte existant avec le même **e-mail**, puis à défaut avec le même **téléphone** (comparaison exacte), est réutilisé (400 si c’est un compte `Admin`). Sinon, un compte léger `inactif` est créé (e-mail factice `no-email-<uuid>@nanei.local` si aucun e-mail n’est fourni). Le destinataire est aussi ajouté aux **contacts favoris** de l’expéditeur, sans doublon sur le téléphone.
+Résolution du destinataire manuel : un compte existant avec le même **e-mail**, puis à défaut avec le même **téléphone** (comparaison exacte), est réutilisé (400 « Ce contact correspond à un compte non autorisé comme destinataire » si c’est un compte `Admin`). Sinon, un compte léger `inactif` est créé (e-mail factice `no-email-<uuid>@nanei.local` si aucun e-mail n’est fourni). Le destinataire est aussi ajouté aux **contacts favoris** de l’expéditeur, sans doublon sur le téléphone.
 
 Prix : le back appelle le même calcul que `POST /pricing/calculate` (poids × prix au kg de la plage + récupération + livraison) et enregistre ce total dans `colis.prix`. Erreurs possibles en 400 : « Pays non trouvé », « Type de transport invalide (aérien ou maritime) », « Aucune plage de poids ne correspond au poids de N kg », « Version de l'application obsolète… » (si `PRIX_SERVEUR_OBLIGATOIRE=true` et que `countryId` / `shippingType` manquent).
 
@@ -553,7 +563,7 @@ Effets de bord : une ligne `Notifications` (pour le destinataire), une ligne `Pa
   "colis": {
     "id": "uuid", "reference": "COL-2026-B5A880-1234",
     "expediteurId": "uuid", "recepteurId": "uuid",
-    "poids": 10, "prix": 150, "destination": "Sénégal",
+    "poids": 10, "prix": 160, "destination": "Sénégal",
     "description": "Sac de vêtements", "type_colis": "Vêtements",
     "type_transport": "aerien",
     "statut": "en_attente",
@@ -562,9 +572,9 @@ Effets de bord : une ligne `Notifications` (pour le destinataire), une ligne `Pa
 }
 ```
 
-Format de la référence : `COL-<année>-<6 hex majuscules>-<4 chiffres>`. ⚠️ À vérifier : `lot_id` est probablement absent (et non `null`) pour un envoi simple.
+`prix` = total calculé par le back (ici 10 kg × 15 + livraison 10). `type_transport` vaut `null` si `shippingType` est absent (ancienne app). Format de la référence : `COL-<année>-<6 hex majuscules>-<4 chiffres>`. ⚠️ À vérifier : `lot_id` est probablement absent (et non `null`) pour un envoi simple.
 
-**Erreurs :** 400 `{ message }` (destinataire, champs manquants, compte non autorisé, poids hors grille…) · 500 `{ message, erreur }`. Le mobile affiche le `message` du back dans le toast d’échec.
+**Erreurs :** 400 `{ message }` (destinataire, champs manquants, compte non autorisé, poids hors grille…) · 500 `{ message: "Erreur serveur lors de l'envoi du colis" }` (le champ `erreur` est retiré par le filtre des 5xx). Le mobile affiche le `message` du back dans le toast d’échec.
 
 ---
 
@@ -584,7 +594,7 @@ Plusieurs colis en **une seule transaction** (tout ou rien), avec un `lot_id` co
 }
 ```
 
-**Erreurs (400, `{ message }`) :** « Aucun colis fourni » · « Un lot ne peut pas contenir plus de 20 colis » · « Un des colis du lot est incomplet (destinataire, poids ou destination manquant) » · erreurs de calcul du prix (voir ci-dessus) · « Récepteur non trouvé pour un des colis du lot » · 500.
+**Erreurs (400, `{ message }`) :** « Aucun colis fourni » · « Un lot ne peut pas contenir plus de 20 colis » · « Un des colis du lot est incomplet (destinataire, poids ou destination manquant) » · erreurs de calcul du prix (voir ci-dessus) · erreurs du destinataire manuel (voir ci-dessus) · « Récepteur non trouvé pour un des colis du lot » · 500 `{ message: "Erreur serveur lors de l'envoi du lot de colis" }`.
 
 ---
 
@@ -599,12 +609,16 @@ Plusieurs colis en **une seule transaction** (tout ou rien), avec un `lot_id` co
 
 #### `GET /nanei/client/colis-envoyes` et `GET /nanei/client/colis-recus`
 
-Colis où l’utilisateur est l’expéditeur (respectivement le destinataire), du plus récent au plus ancien, **sans pagination**.
+Colis où l’utilisateur est l’expéditeur (respectivement le destinataire), du plus récent au plus ancien.
+
+**Paramètres (facultatifs) :** `page`, `limit` (voir « Pagination des listes », §0) · `statut` = `en_attente` | `recupere` | `livre` (`tous` ou vide = pas de filtre ; autre valeur → 400), appliqué **avant** la pagination. Sans `page` ni `limit` : liste complète (utilisé par le formulaire de réclamation).
 
 **Réponse 200**
 
 ```json
 {
+  "par_statut": { "en_attente": 1, "recupere": 0, "livre": 3, "total": 4 },
+  "pagination": { "page": 1, "limit": 20, "total": 4, "pages": 1 },
   "data": [
     {
       "id": "uuid", "reference": "COL-2026-469D90-5678",
@@ -621,9 +635,12 @@ Colis où l’utilisateur est l’expéditeur (respectivement le destinataire), 
 }
 ```
 
+- `par_statut` : toujours présent ; nombre de colis de l’utilisateur (envoyés, respectivement reçus) par statut, sur **toutes les pages** et **sans** le filtre `statut`.
+- `pagination` : présent seulement si `page` ou `limit` est passé.
+
 > `statut` ∈ `en_attente` | `recupere` | `livre`. C’est la seule source de vérité : il est modifié par l’admin (`PUT /nanei/admin/changer-statut-*/:id`). Le mobile doit recharger la liste pour voir un changement (ou réagir à la notification push).
 
-**Erreurs :** 400 `{ message }` · 500 `{ message, erreur }`.
+**Erreurs :** 400 « Statut invalide (en_attente, recupere, livre) » · 400 `{ message }` (autre erreur du service) · 500 `{ message: "Erreur serveur lors de la récupération des colis envoyés" }` (resp. « … reçus » ; champ `erreur` retiré).
 
 ---
 
@@ -633,7 +650,7 @@ Utilisé après le scan du QR code de l’étiquette.
 
 **Réponse 200 :** `{ "data": { …colis, "expediteur": {…}, "recepteur": {…} } }` (même forme qu’un élément de liste).
 
-**Erreurs :** 404 « Colis introuvable » · 403 « Ce colis ne vous appartient pas » · 500.
+**Erreurs :** 404 « Colis introuvable » · 403 « Ce colis ne vous appartient pas » (toute autre erreur du service répond aussi 403) · 500.
 
 ---
 
@@ -663,6 +680,8 @@ La réponse contient toujours `non_lues` : nombre **total** de notifications non
 
 ```json
 {
+  "non_lues": 3,
+  "pagination": { "page": 1, "limit": 20, "total": 12, "pages": 1 },
   "data": [
     {
       "id": "uuid", "expediteurId": "uuid", "recepteurId": "uuid", "colisId": "uuid",
@@ -675,7 +694,9 @@ La réponse contient toujours `non_lues` : nombre **total** de notifications non
 }
 ```
 
-`statut` ∈ `lu` | `non_lu`. ⚠️ À vérifier : la date du colis inclus est demandée sous la clé `created_at` ; il faut confirmer par un appel réel la clé effectivement renvoyée.
+`statut` ∈ `lu` | `non_lu`. `pagination` n’est présent que si `page` ou `limit` est passé. ⚠️ À vérifier : la date du colis inclus est demandée sous la clé `created_at` ; il faut confirmer par un appel réel la clé effectivement renvoyée.
+
+**Erreurs :** 400 `{ message }` (erreur du service) · 500 `{ message: "Erreur serveur lors de la récupération des notifications" }`.
 
 ---
 
@@ -709,6 +730,8 @@ Aucun corps. Passe à `lu` toutes les notifications `non_lu` de l’utilisateur 
 
 Paiements dont l’utilisateur est le payeur (un par colis envoyé), du plus récent au plus ancien.
 
+**Paramètres (facultatifs) :** `page`, `limit` (§0) · `statut` = `en_attente` | `en_cours` | `paye` | `echoue` | `rembourse` (`tous` ou vide = pas de filtre ; autre valeur → 400), appliqué avant la pagination.
+
 **Réponse 200**
 
 ```json
@@ -717,17 +740,21 @@ Paiements dont l’utilisateur est le payeur (un par colis envoyé), du plus ré
   "data": [
     {
       "id": "uuid", "colisId": "uuid", "payeurId": "uuid",
-      "prixTotal": 150, "montantPaye": 0,
+      "prixTotal": 150, "montantPaye": null,
       "moyenPaiement": null, "statut": "en_attente",
-      "referenceTransaction": null, "checkoutUrl": null, "webhookPayload": null,
+      "referenceTransaction": null, "checkoutUrl": null,
       "createdAt": "…", "updatedAt": "…",
       "colis": { "id": "uuid", "reference": "COL-…", "prix": 150, "poids": 10, "destination": "France", "type_colis": "…", "statut": "en_attente" }
     }
-  ]
+  ],
+  "par_statut": { "en_attente": 1, "en_cours": 0, "paye": 0, "echoue": 0, "rembourse": 0, "total": 1 },
+  "pagination": { "page": 1, "limit": 20, "total": 1, "pages": 1 }
 }
 ```
 
-`prixTotal`, `montantPaye`, `colis.prix` et `colis.poids` sont convertis en **nombres** (les colonnes `DECIMAL` sortent normalement en texte). `statut` ∈ `en_attente` | `en_cours` | `paye` | `echoue` | `rembourse` ; `moyenPaiement` ∈ `wave` | `orange_money` | `null`.
+`prixTotal`, `montantPaye`, `colis.prix` et `colis.poids` sont convertis en **nombres** (les colonnes `DECIMAL` sortent normalement en texte) ; `montantPaye` reste `null` tant que rien n’a été payé. `webhookPayload` (charge brute de l’opérateur) n’est **jamais** renvoyé. `statut` ∈ `en_attente` | `en_cours` | `paye` | `echoue` | `rembourse` ; `moyenPaiement` ∈ `wave` | `orange_money` | `null`. `par_statut` : toujours présent, compteurs sur tous les paiements du client (toutes pages, sans filtre). `pagination` : seulement si `page` ou `limit` est passé.
+
+**Erreurs :** 400 `{ success: false, message: "Statut invalide (en_attente, en_cours, paye, echoue, rembourse)" }` · 500 `{ success: false, message: "Erreur serveur" }`.
 
 ---
 
@@ -759,7 +786,9 @@ Aucun montant n’est envoyé par le client : le back le calcule. Il prend le pr
 
 Le paiement passe à `en_cours`. Ouvrir `checkoutUrl` dans le navigateur.
 
-**Erreurs (400, `{ success: false, message }`) :** « Colis non trouvé ou non autorisé » · « Paiement non trouvé pour ce colis » · « Ce colis est déjà payé » · « Montant minimum : 100 XOF » · « Montant maximum : 10000000 XOF » · « Moyen de paiement invalide » · « Erreur lors de l'initialisation du paiement: … » (le paiement passe alors à `echoue`). 500.
+**Erreurs (400, `{ success: false, message }`) :** « Colis non trouvé ou non autorisé » · « Paiement non trouvé pour ce colis » · « Ce colis est déjà payé » · « Montant minimum : 100 XOF » · « Montant maximum : 10000000 XOF » · « Moyen de paiement invalide » · « Erreur lors de l'initialisation du paiement: … » (le paiement passe alors à `echoue`). 500 `{ success: false, message: "Erreur serveur" }`.
+
+> `moyenPaiement` n’est contrôlé qu’après les vérifications du colis et du montant : une valeur invalide répond « Moyen de paiement invalide » sans changer le statut du paiement.
 
 ---
 
@@ -861,10 +890,12 @@ Les téléphones sont masqués (2 premiers et 2 derniers caractères). L’histo
   "preuve": {
     "id": "uuid", "colis_id": "uuid", "photo_url": "https://…",
     "commentaire": null, "gps_lat": null, "gps_lng": null,
-    "createdAt": "…", "updatedAt": "…"
+    "createdAt": "…"
   }
 }
 ```
+
+Pas de `updatedAt` : le modèle `PreuveLivraison` est défini avec `updatedAt: false`.
 
 **Erreurs :** 404 « Colis introuvable » · 403 « Accès non autorisé » · 404 « Aucune preuve disponible » (cas normal tant que l’admin n’a pas téléversé de photo) · 500.
 
@@ -887,7 +918,7 @@ Les téléphones sont masqués (2 premiers et 2 derniers caractères). L’histo
 | `note` | integer | **oui** | 1 à 5 |
 | `commentaire` | string | non | — |
 
-**Réponse 201 :** `{ "success": true, "message": "Avis enregistré", "avis": { id, colis_id, utilisateur_id, note, commentaire, createdAt, updatedAt } }`.
+**Réponse 201 :** `{ "success": true, "message": "Avis enregistré", "avis": { id, colis_id, utilisateur_id, note, commentaire, createdAt } }` (pas de `updatedAt` : modèle défini avec `updatedAt: false`).
 
 **Erreurs :** 400 « colis_id et note sont obligatoires » · 400 « La note doit être un entier entre 1 et 5 » (« 4 » accepté, 4.5 ou « abc » refusés) · 404 « Colis introuvable » · 403 « Ce colis ne vous appartient pas » · 400 « Vous pouvez donner un avis uniquement après livraison » · 409 « Un avis existe déjà pour ce colis » · 500.
 
@@ -897,7 +928,11 @@ Les téléphones sont masqués (2 premiers et 2 derniers caractères). L’histo
 
 #### `GET /nanei/avis`
 
-**Réponse 200 :** `{ "success": true, "avis": [ { …avis, "colis": { "reference": "…", "destination": "…" } } ] }`.
+Avis donnés par l’utilisateur, du plus récent au plus ancien. **Paramètres (facultatifs) :** `page`, `limit` (§0). Sans eux : liste complète (le détail d’un colis s’en sert pour savoir s’il est déjà noté).
+
+**Réponse 200 :** `{ "success": true, "avis": [ { …avis, "colis": { "reference": "…", "destination": "…" } } ] }`, plus `"pagination": { page, limit, total, pages }` si `page` ou `limit` est passé.
+
+**Erreurs :** 500 `{ success: false, message: "Erreur serveur" }`.
 
 ---
 
@@ -922,7 +957,7 @@ Les téléphones sont masqués (2 premiers et 2 derniers caractères). L’histo
 
 **Réponse 201 :** `{ "success": true, "message": "Réclamation créée", "reclamation": { id, colis_id, utilisateur_id, type, description, photos: ["https://…"], statut: "ouverte", commentaire_admin: null, createdAt, updatedAt } }`.
 
-**Erreurs :** 400 « Champs obligatoires manquants » · 400 « Type de réclamation invalide (perdu, endommagé, retard ou autre) » · 400 « Type de fichier non autorisé » · 413 « Fichier trop volumineux » · 404 « Colis introuvable » · 403 « Ce colis ne vous appartient pas » · 500.
+**Erreurs :** 400 « Champs obligatoires manquants » · 400 « Type de réclamation invalide (perdu, endommagé, retard ou autre) » · 400 « Type de fichier non autorisé » (type déclaré) · 400 « Type de fichier non autorisé (contenu non reconnu comme image PNG, JPEG, WEBP ou PDF) » (contenu réel) · 400 « Trop de fichiers ou champ de fichier inattendu » (plus de 5 photos) · 413 « Fichier trop volumineux » · 404 « Colis introuvable » · 403 « Ce colis ne vous appartient pas » · 500 `{ success: false, message: "Erreur serveur" }`.
 
 > Le formulaire mobile propose les colis **envoyés et reçus** de l’utilisateur.
 
@@ -930,7 +965,9 @@ Les téléphones sont masqués (2 premiers et 2 derniers caractères). L’histo
 
 #### `GET /nanei/reclamations` et `GET /nanei/reclamations/:id`
 
-**Réponse 200 :** `{ "success": true, "reclamations": [ … ] }` ou `{ "success": true, "reclamation": { … } }`. Chaque réclamation inclut `colis: { reference, statut, destination }`. `statut` ∈ `ouverte` | `en_cours` | `resolue` | `rejetee` (libellés mobile : Ouverte · En cours · Résolue · Rejetée).
+Liste : réclamations **créées par l’utilisateur**, de la plus récente à la plus ancienne ; paramètres facultatifs `page`, `limit` (§0, pas de filtre `statut` côté client). Détail : seulement si l’utilisateur en est l’auteur (sinon 404).
+
+**Réponse 200 :** `{ "success": true, "reclamations": [ … ] }` (+ `pagination` si `page` ou `limit` est passé) ou `{ "success": true, "reclamation": { … } }`. Chaque réclamation inclut `colis: { reference, statut, destination }`. `statut` ∈ `ouverte` | `en_cours` | `resolue` | `rejetee` (libellés mobile : Ouverte · En cours · Résolue · Rejetée).
 
 **Erreurs :** 404 « Réclamation introuvable » · 500.
 
@@ -950,7 +987,9 @@ Les contacts sont aussi créés **automatiquement** lors d’un envoi à un dest
 **Entité `contact` :** `{ id, utilisateur_id, nom, prenom, email, telephone, ville, pays_id, createdAt, updatedAt }`.
 
 #### `GET /nanei/contacts`
-**Réponse 200 :** `{ "success": true, "contacts": [ … ] }`, du plus récent au plus ancien.
+**Paramètres (facultatifs) :** `page`, `limit` (§0) · `q` : recherche insensible à la casse dans `nom`, `prenom`, `telephone` et `email` (100 caractères max, appliquée avant la pagination). Le mobile n’envoie pas `q`.
+
+**Réponse 200 :** `{ "success": true, "contacts": [ … ] }`, du plus récent au plus ancien, plus `pagination` si `page` ou `limit` est passé. **Erreur :** 500.
 
 #### `POST /nanei/contacts`
 
@@ -958,7 +997,7 @@ Les contacts sont aussi créés **automatiquement** lors d’un envoi à un dest
 |---|---|---|---|
 | `nom` | string | **oui** | sinon 400 « Le nom est obligatoire » |
 | `prenom`, `email`, `telephone`, `ville` | string | non | — |
-| `pays` | UUID | non | enregistré dans `pays_id` (doit être l’ID d’un pays existant, sinon 500) |
+| `pays_id` (ou `pays`) | UUID | non | enregistré dans `pays_id` (`pays_id` prioritaire si les deux sont envoyés ; doit être l’ID d’un pays existant, sinon 500) |
 
 **Réponse 201 :** `{ "success": true, "message": "Contact créé", "contact": { … } }`.
 
@@ -968,7 +1007,7 @@ Mêmes champs, tous facultatifs (un champ présent remplace la valeur). **Répon
 #### `DELETE /nanei/contacts/:id`
 **Réponse 200 :** `{ "success": true, "message": "Contact supprimé" }`. **Erreur :** 404 « Contact introuvable ».
 
-> Attention à l’asymétrie : en écriture le champ s’appelle `pays`, en lecture il s’appelle `pays_id`.
+> Le pays s’écrit et se lit sous le même nom, `pays_id` ; l’ancien nom `pays` reste accepté en écriture (correctif #41).
 
 ---
 
@@ -1027,7 +1066,7 @@ Mêmes champs, tous facultatifs (un champ présent remplace la valeur). **Répon
 `id`, `expediteurId`, `recepteurId`, `colisId`, `statut` (`lu` | `non_lu`), `createdAt`, `updatedAt`, `deletedAt`, `colis`, `expediteur`.
 
 ### Paiement
-`id`, `colisId`, `payeurId`, `prixTotal`, `montantPaye`, `moyenPaiement`, `statut`, `referenceTransaction`, `checkoutUrl`, `webhookPayload`, `createdAt`, `updatedAt`, `colis`.
+`id`, `colisId`, `payeurId`, `prixTotal`, `montantPaye` (`null` tant que rien n’est payé), `moyenPaiement`, `statut`, `referenceTransaction`, `checkoutUrl`, `createdAt`, `updatedAt`, `colis`. (`webhookPayload` existe en base mais n’est jamais renvoyé au client.)
 
 ### Réclamation
 `id`, `colis_id`, `utilisateur_id`, `type`, `description`, `photos` (tableau d’URL), `statut`, `commentaire_admin`, `createdAt`, `updatedAt`, `colis`.
@@ -1036,10 +1075,10 @@ Mêmes champs, tous facultatifs (un champ présent remplace la valeur). **Répon
 `id`, `utilisateur_id`, `nom`, `prenom`, `email`, `telephone`, `ville`, `pays_id`, `createdAt`, `updatedAt`.
 
 ### Preuve de livraison
-`id`, `colis_id`, `photo_url`, `commentaire`, `gps_lat`, `gps_lng`, `createdAt`, `updatedAt`.
+`id`, `colis_id`, `photo_url`, `commentaire`, `gps_lat`, `gps_lng`, `createdAt` (pas de `updatedAt`).
 
 ### Avis
-`id`, `colis_id` (unique), `utilisateur_id`, `note` (1 à 5), `commentaire`, `createdAt`, `updatedAt`.
+`id`, `colis_id` (unique), `utilisateur_id`, `note` (1 à 5), `commentaire`, `createdAt` (pas de `updatedAt`).
 
 ---
 
@@ -1094,22 +1133,24 @@ Mêmes champs, tous facultatifs (un champ présent remplace la valeur). **Répon
 | 19 | ✅ DONE | Mobile : aucun écran pour la photo de profil. Back : les erreurs d’upload répondaient 500. | Choix de la photo depuis l’avatar et envoi multipart. Back : WEBP accepté pour le profil, type refusé → 400, fichier trop gros → 413. |
 | 20 | ✅ DONE | Connexion par téléphone : la comparaison était exacte, donc `76000000` était refusé pour un compte `+22376000000`. | Recherche tolérante (voir `POST /auth/login`), refus en cas d’ambiguïté. |
 
-### C.3 Incohérences internes au back (non traitées)
+### C.3 Incohérences internes au back
+
+État vérifié à la relecture du 2026-10-12.
 
 | # | Constat |
 |---|---|
-| 21 | `adresse` est facultative pour Joi mais `NOT NULL` en base : une inscription sans `adresse` produit une 500. Même chose pour `telephone`, facultatif pour Joi mais exigé par le service (400). |
-| 22 | Ni le changement ni la réinitialisation du mot de passe ne mettent à jour `passwordChangedAt` ni ne révoquent les refresh tokens : les sessions existantes restent valides. |
-| 23 | Pas d’enveloppe de réponse commune ni de code d’erreur stable (voir §0) ; les identifiants invalides répondent 400 et non 401. |
-| 24 | `/auth/refresh` partage la limite de 5 / 15 min par IP avec la connexion (risque de 429 derrière un NAT d’opérateur). Le mobile n’envoie plus qu’un rafraîchissement à la fois, mais la limite reste partagée. |
-| 25 | La signature des webhooks est vérifiée sur `JSON.stringify(req.body)` et non sur le corps brut reçu : selon le format envoyé par l’opérateur, des webhooks légitimes peuvent être rejetés. À tester avec un vrai webhook Wave / Orange Money (indispensable maintenant que la validation d’un paiement Orange Money repose uniquement sur le webhook). |
-| 26 | Les règles de mot de passe diffèrent : back 8 caractères avec majuscule, minuscule et chiffre ; mobile 12 caractères avec symbole (plus strict). C’est compatible, mais le formulaire mobile de changement refuse un nouveau mot de passe qui respecte seulement la règle du back. |
+| 21 | ✅ **Résolu (#33)** pour `adresse` (vide par défaut). Reste : `telephone` facultatif pour Joi mais exigé par le service (400 « Le numéro de téléphone est obligatoire »). |
+| 22 | ✅ **Résolu (#30)** : `passwordChangedAt` mis à jour et refresh tokens révoqués au changement et à la réinitialisation. |
+| 23 | ⏳ Toujours vrai : pas d’enveloppe de réponse commune ni de code d’erreur stable (voir §0) ; les identifiants invalides répondent 400 et non 401. |
+| 24 | ✅ **Résolu (#31)** : compteurs séparés (connexion 5, renouvellement 30, mots de passe 5). |
+| 25 | ✅ **Résolu (#34)**, à confirmer avec un vrai webhook : signature vérifiée sur le corps brut (`req.rawBody`). |
+| 26 | ⏳ Toujours vrai : back 8 caractères avec majuscule, minuscule et chiffre ; mobile 12 caractères avec symbole (`lib/core/utils/security_validators.dart:69-74`). Compatible, mais le formulaire mobile refuse un mot de passe qui respecte seulement la règle du back. |
 
 ### C.4 Points de sécurité restants
 
 | # | Gravité | Constat |
 |---|---|---|
-| 27 | Moyenne | `GET /client/rechercher-client` expose l’e-mail et le téléphone de tout compte actif à n’importe quel utilisateur connecté. |
+| 27 | ~~Moyenne~~ | ✅ **Résolu (#32)** : `GET /client/rechercher-client` n’accepte plus qu’un e-mail complet ou un numéro, renvoie un seul compte et masque e-mail et téléphone. |
 
 ### C.4 bis Correctifs du 2026-10-11 issus de la vérification de l’admin
 
@@ -1157,6 +1198,37 @@ Laissés sans pagination, volontairement : sélecteur de pays, `GET /avis` dans 
 | 42 | ✅ DONE | Recherche de destinataire : seuil de 5 caractères pour un numéro, alors que la connexion en exige 7 chiffres. | 7 chiffres minimum pour un numéro. |
 
 Suites de tests (2026-10-12) : back **678 tests** (Jest + Supertest, `src/__tests__/`, exécutés par le CI avant tout déploiement), admin **166 tests** (Vitest), mobile **272 tests** (`flutter test`, exécutés par le CI avant toute publication).
+
+### C.6 Relecture complète du 2026-10-12 — écarts mobile ↔ back
+
+**Couverture.** 45 routes montées hors `/nanei/admin` (+ `GET /health`), dont 2 webhooks hors périmètre : **43 routes** dans le périmètre, toutes documentées. L’application implémente **42 appels** (tous existent côté back, méthode et chemin justes) ; `GET /paiements/retour` est appelée par le navigateur, `GET /health` par personne côté mobile. Deux appels sont implémentés dans la couche données mais déclenchés par **aucun écran** : `PUT /contacts/:id` (`lib/features/contacts/data/datasources/contact_remote_datasource.dart:48`) et `GET /reclamations/:id` (`lib/features/reclamations/data/datasources/reclamation_remote_datasource.dart:67`).
+
+**Corrections apportées au contrat à cette relecture** (le code n’a pas changé, seul le document était faux ou incomplet) :
+
+| Route | Ce qui était faux |
+|---|---|
+| `GET /client/colis-envoyes`, `GET /client/colis-recus` | Décrites « sans pagination » : `page`, `limit`, `statut`, `par_statut` et `pagination` manquaient dans la section. |
+| `GET /client/mes-notifications` | Exemple sans `non_lues` ni `pagination`. |
+| `GET /paiements` | Exemple avec `webhookPayload` (retiré, #39) et `montantPaye: 0` (c’est `null`) ; `statut`, `par_statut`, `pagination` absents de la section. |
+| `GET /avis`, `GET /reclamations`, `GET /contacts` | Pagination (et `q` pour les contacts) absente des sections. |
+| `POST /avis`, `GET /colis/:colisId/preuve` | `updatedAt` annoncé alors que les modèles ont `updatedAt: false`. |
+| `POST /auth/register` | « Adresse absente → 500 » (corrigé par #33). |
+| `PUT /account/modifier-profil` | « `telephone: ""` accepté (ignoré) » : c’est 400 « Le numéro de téléphone est obligatoire » pour un client. |
+| `POST /contacts` | Champ `pays` seulement : `pays_id` est accepté (#41). |
+| `POST /auth/refresh`, `POST /auth/reset-password`, `POST /client/envoie-colis`, `GET /client/rechercher-client`, `POST /pricing/calculate`, `POST /reclamations` | Messages d’erreur manquants (session expirée, blocage en cours, destination / prix / compte admin, recherche impossible, poids ≤ 0, trop de photos, contenu de fichier non reconnu). |
+| Erreurs 500 (plusieurs routes) | `{ message, erreur }` / `error` annoncés : ces champs sont retirés de toute réponse ≥ 500. |
+| Sommaire | §6 comptait 2 routes au lieu de 3. |
+
+**Écarts mobile ↔ back restants** (aucun ne casse un appel) :
+
+| # | Gravité | Écart | Côté mobile |
+|---|---|---|---|
+| 43 | Faible | Le champ Téléphone du formulaire « Modifier le profil » n’est pas obligatoire ; s’il est vidé, le back répond 400 « Le numéro de téléphone est obligatoire » (message affiché par l’app). | `lib/features/home/presentation/pages/client/profils_page.dart:1078` (champ sans `required`), `:1033` (envoi) |
+| 44 | Faible | Réinitialisation du mot de passe : l’app bloque localement après **5** échecs, le back bloque déjà après **3** (« Trop de tentatives. Réessayez dans 15 minutes. »). Les deux messages peuvent se succéder. | `lib/features/auth/presentation/pages/reset_password_page.dart:35` |
+| 45 | Info | Règles de mot de passe différentes (voir #26). | `lib/core/utils/security_validators.dart:69-74` |
+| 46 | Info | Le modèle de contact sérialise encore le pays sous `pays` (toléré par le back) ; l’écran d’ajout n’envoie aucun pays. | `lib/features/contacts/data/models/contact_favori_model.dart:34`, `lib/features/contacts/presentation/pages/ajouter_contact_page.dart:36-42` |
+| 47 | Info | L’envoi de colis transmet encore `prix` et `destination`, ignorés par le back dès que `countryId` et `shippingType` sont présents (toujours le cas dans l’app). | `lib/features/home/data/datasources/colis_remote_datasource.dart:132-133`, `lib/features/home/domain/usecases/envoyer_colis_lot.dart:16-17` |
+| 48 | Info | ⚠️ À vérifier : la clé de date des lignes d’historique du suivi (`created_at`, demandée explicitement dans les `attributes` d’un modèle `underscored`) ; le mobile ne lit que `created_at`. (Pour les notifications, le mobile lit la date de la notification elle-même, `createdAt` puis `created_at` : pas d’écart.) | `lib/features/home/data/models/suivi_public_model.dart:57` |
 
 ### C.5 Déploiement
 
